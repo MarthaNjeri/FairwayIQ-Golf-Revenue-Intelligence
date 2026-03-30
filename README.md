@@ -77,3 +77,16 @@ FairwayIQ/
 ├── README.md
 └── requirements.txt
 # Golf-Club-Management-Revenue-Intelligence-AI-BI-Project-
+---
+
+## 📊 Live Dashboard
+
+You can view the interactive Power BI dashboard here:
+
+🔗 **FairwayIQ Live Dashboard:**  
+https://app.powerbi.com/view?r=eyJrIjoiYzMzYjA2ODEtYWUzNy00ZTYyLWI3MjMtZTM0Y2QzOWVhZWIwIiwidCI6ImNjZWM4MmJhLTA1OTctNDRjNy1hODM4LTEzNjIwY2MxZGJlYiJ9
+
+> This dashboard presents membership engagement, revenue analysis, retention insights, and churn risk indicators for golf club management decision-making.
+
+---
+
