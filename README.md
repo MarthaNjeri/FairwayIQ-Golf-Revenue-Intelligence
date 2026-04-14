@@ -97,4 +97,17 @@ A structured presentation script designed for executive-level delivery:
 📄 [View Presentation Script](presentation/presentation_script.md)
 
 ---
+## 🧠 Industry Context
+
+Most golf clubs in Kenya rely on fragmented systems such as manual coordination, spreadsheets, and basic booking platforms.
+
+While solutions like Let’s Play support competition and booking management, there is a gap in advanced analytics and decision intelligence.
+
+FairwayIQ addresses this gap by providing:
+- Revenue intelligence
+- Member segmentation
+- Engagement analytics
+- Churn risk identification
+
+This positions the platform as a strategic decision-support system rather than an operational tool.
 
