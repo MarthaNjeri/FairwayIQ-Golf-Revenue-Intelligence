@@ -88,5 +88,13 @@ https://app.powerbi.com/view?r=eyJrIjoiYzMzYjA2ODEtYWUzNy00ZTYyLWI3MjMtZTM0Y2QzO
 
 > This dashboard presents membership engagement, revenue analysis, retention insights, and churn risk indicators for golf club management decision-making.
 
+------
+
+## 🎤 Boardroom Presentation
+
+A structured presentation script designed for executive-level delivery:
+
+📄 [View Presentation Script](presentation/presentation_script.md)
+
 ---
 
