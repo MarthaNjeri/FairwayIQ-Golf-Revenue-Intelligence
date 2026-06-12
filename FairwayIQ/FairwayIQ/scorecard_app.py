@@ -157,3 +157,13 @@ if not df_leaderboard.empty:
 else:
         st.rerun()
     st.info("No rounds submitted today yet. Be the first to post a score!")
+# --- STEP 6: EXECUTIVE POWER BI INTEGRATION ---
+st.markdown("---")
+st.header("📊 FairwayIQ Executive Revenue & Churn Dashboard")
+st.caption("Live interactive business intelligence tracking from Limuru Country Club data lake.")
+
+# Secure public embed URL provided from your Power BI Service account
+power_bi_url = "https://app.powerbi.com/view?r=eyJrIjoiYzMzYjA2ODEtYWUzNy00ZTYyLWI3MjMtZTM0Y2QzOWVhZWIwIiwidCI6ImNjZWM4MmJhLTA1OTctNDRjNy1hODM4LTEzNjIwY2MxZGJlYiJ9"
+
+# Render the interactive iframe canvas inside the web page frame
+st.components.v1.iframe(power_bi_url, height=600, scrolling=True)
