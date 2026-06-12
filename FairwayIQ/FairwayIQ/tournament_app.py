@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import datetime
+import os
 
 # Set up page config for a professional look
 st.set_page_config(page_title="FairwayIQ - Live Tournament Center", layout="wide")
@@ -10,8 +11,10 @@ st.title("⛳ FairwayIQ Tournament Center")
 st.subheader("Limuru Country Club - Live Scoring Dashboard")
 
 # --- DATABASE / FILE PATH ---
-# Using the live dataset we synced earlier
 DATA_PATH = "data/live_leaderboard.csv"
+
+# Ensure data folder exists
+os.makedirs(os.path.dirname(DATA_PATH), exist_ok=True)
 
 # Load the current leaderboard data safely
 try:
@@ -29,27 +32,20 @@ except FileNotFoundError:
     df_scores.to_csv(DATA_PATH, index=False)
 
 # --- AUTOMATIC COLUMN MATCHING ---
-# Print columns to your terminal so you can verify what's inside the file
-print("Your actual CSV columns are:", list(df_scores.columns))
-
-# Clean up column names (remove hidden spaces for safety)
 df_scores.columns = df_scores.columns.str.strip()
 
-# 1. Smart-lookup: Find whichever column represents the score
 score_col = None
 for col in ['Gross_Score', 'Gross Score', 'Score', 'score', 'gross_score']:
     if col in df_scores.columns:
         score_col = col
         break
 
-# 2. Smart-lookup: Find whichever column represents the handicap
 hcp_col = None
 for col in ['Handicap', 'handicap', 'HCP', 'hcp']:
     if col in df_scores.columns:
         hcp_col = col
         break
 
-# 3. Smart-lookup: Find whichever column represents the player's name
 name_col = None
 for col in ['Name', 'name', 'Player', 'player', 'Member_Name', 'Member', 'Name ']:
     if col in df_scores.columns:
@@ -62,12 +58,10 @@ if score_col and hcp_col:
     df_scores['Handicap'] = df_scores[hcp_col].astype(float)
     df_scores['Net_Score'] = df_scores['Gross_Score'] - df_scores['Handicap']
 else:
-    # Safe fallback if your live CSV doesn't have score columns yet
     df_scores['Gross_Score'] = 80
     df_scores['Handicap'] = 10
     df_scores['Net_Score'] = 70
 
-# Map the name column safely so line 98 always finds it
 if name_col:
     df_scores['Name'] = df_scores[name_col]
 else:
@@ -78,53 +72,72 @@ df_scores = df_scores.sort_values(by='Net_Score').reset_index(drop=True)
 
 
 # --- TOURNAMENT STATE MANAGEMENT ---
-# We use Streamlit's session state to track if the tournament is active or finalized
 if 'tournament_locked' not in st.session_state:
     st.session_state.tournament_locked = False
+if 'admin_verified' not in st.session_state:
+    st.session_state.admin_verified = False
 
-# --- SIDEBAR CONTROLLER (For Club Officials / Captains) ---
+# --- SECURE SIDEBAR CONTROLLER (For Club Officials / Captains) ---
 st.sidebar.header("🛠️ Tournament Control Desk")
-st.sidebar.write("Simulate closing the tournament once the final flight submits their scores.")
 
-if not st.session_state.tournament_locked:
-    if st.sidebar.button("🔒 Finalize Tournament & Lock Scores", type="primary"):
-        st.session_state.tournament_locked = True
-        st.rerun()
+if not st.session_state.admin_verified:
+    st.sidebar.write("🔒 Enter Official Credentials to unlock tournament state modifications.")
+    official_pin = st.sidebar.text_input("Club Captain / Admin PIN:", type="password")
+    
+    if st.sidebar.button("Verify Official Access"):
+        if official_pin == "1234":  # Change this to match your preferred official password
+            st.session_state.admin_verified = True
+            st.sidebar.success("Access Granted!")
+            st.rerun()
+        else:
+            st.sidebar.error("❌ Invalid PIN. Action Blocked.")
 else:
-    if st.sidebar.button("🔄 Re-open Live Scoring"):
-        st.session_state.tournament_locked = False
+    st.sidebar.success("🔑 Certified Official Mode Active")
+    st.sidebar.write("Close the tournament field once the final flight logs their score cards.")
+    
+    if not st.session_state.tournament_locked:
+        if st.sidebar.button("🔒 Finalize Tournament & Lock Scores", type="primary"):
+            st.session_state.tournament_locked = True
+            st.rerun()
+    else:
+        if st.sidebar.button("🔄 Re-open Live Scoring"):
+            st.session_state.tournament_locked = False
+            st.rerun()
+            
+    if st.sidebar.button("🚪 Lock Control Desk"):
+        st.session_state.admin_verified = False
+        st.sidebar.info("Logged out of control desk.")
         st.rerun()
-# --- INTERFACE DISPLAY LOGIC ---
 
+
+# --- INTERFACE DISPLAY LOGIC ---
 if not st.session_state.tournament_locked:
     # 🟢 PHASE 1: LIVE TOURNAMENT ACTIVE
     st.success("🟢 TOURNAMENT ACTIVE: Scores are live-populating from member phones.")
     
-    # Show active statistics
     col1, col2, col3 = st.columns(3)
     col1.metric("Field Size", f"{len(df_scores)} Players")
-    col2.metric("Current Leader Net", f"{df_scores['Net_Score'].min()} Net")
-    col3.metric("Average Net Score", f"{int(df_scores['Net_Score'].mean())}")
+    
+    if not df_scores.empty:
+        col2.metric("Current Leader Net", f"{int(df_scores['Net_Score'].min())} Net")
+        col3.metric("Average Net Score", f"{int(df_scores['Net_Score'].mean())}")
     
     st.write("### Current Standings")
     st.dataframe(df_scores[['Name', 'Gross_Score', 'Handicap', 'Net_Score']], use_container_width=True)
 
 else:
     # 🔴 PHASE 2: TOURNAMENT LOCKED & WINNER CELEBRATION
-    st.balloons() # Throws a celebration animation on the screen!
+    st.balloons() 
     st.error("🏆 TOURNAMENT CONCLUDED - FINAL RESULTS LOCKED")
     
-    # Extract the top 3 players safely
     winner = df_scores.iloc[0]
     second = df_scores.iloc[1] if len(df_scores) > 1 else None
     third = df_scores.iloc[2] if len(df_scores) > 2 else None
     
-    # Create the Virtual Winner's Podium UI
     st.markdown("## 👑 The Championship Podium")
-    
     podium_col1, podium_col2, podium_col3 = st.columns(3)
     
-    with podium_col2: # Winner goes in the center column
+    with podium_col2:
         st.markdown(
             f"""
             <div style="background-color:#D4AF37; padding:20px; border-radius:15px; text-align:center; color:black;">
@@ -138,7 +151,7 @@ else:
             unsafe_allow_html=True
         )
         
-    with podium_col1: # Second place on the left
+    with podium_col1:
         if second is not None:
             st.markdown(
                 f"""
@@ -153,7 +166,7 @@ else:
                 unsafe_allow_html=True
             )
             
-    with podium_col3: # Third place on the right
+    with podium_col3:
         if third is not None:
             st.markdown(
                 f"""
@@ -170,4 +183,4 @@ else:
 
     st.write("---")
     st.write("### Complete Final Standings")
-    st.table(df_scores[['Name', 'Gross_Score', 'Handicap', 'Net_Score']])
+    st.dataframe(df_scores[['Name', 'Gross_Score', 'Handicap', 'Net_Score']], use_container_width=True)
