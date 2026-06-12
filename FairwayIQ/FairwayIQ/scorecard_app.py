@@ -155,4 +155,5 @@ df_leaderboard = pd.read_csv(DB_FILE)
 if not df_leaderboard.empty:
     st.dataframe(df_leaderboard.sort_values(by="Score", ascending=True), use_container_width=True)
 else:
+        st.rerun()
     st.info("No rounds submitted today yet. Be the first to post a score!")
