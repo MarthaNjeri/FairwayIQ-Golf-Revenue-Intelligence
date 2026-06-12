@@ -108,6 +108,3 @@ FairwayIQ addresses this gap by providing:
 - Member segmentation
 - Engagement analytics
 - Churn risk identification
-
-This positions the platform as a strategic decision-support system rather than an operational tool.
-
