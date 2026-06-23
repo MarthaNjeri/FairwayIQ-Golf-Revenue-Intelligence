@@ -11,9 +11,9 @@ st.caption("Live Event Hospitality Billing & Inventory Sync Engine")
 
 POS_FILE = "data/pos_transactions.csv"
 LEADERBOARD_FILE = "data/live_leaderboard.csv"
+STANDARD_GATE_FEE = 2000  # Baseline prepaid credit initialized at gate check-in
 
 # --- DATABASE SCHEMA ENGINE ---
-# Ensures all reporting dimensions are ready for your Power BI data modeling layers
 if not os.path.exists(POS_FILE):
     pd.DataFrame(columns=[
         "TransactionID", "MemberID", "PlayerName", 
@@ -31,15 +31,31 @@ if os.path.exists(LEADERBOARD_FILE):
             selected_player_label = st.selectbox("Select Active Player at Counter:", list(player_mapping.keys()))
             
             # --- METADATA LINKAGE BRIDGE ---
-            # Extract player profiles established at the gate/scorecard portal
             player_data = player_mapping[selected_player_label]
             target_id = player_data['MemberID']
             target_name = player_data['PlayerName']
             target_hcp = player_data.get('Handicap', 'N/A')
             target_comp = player_data.get('Competition', 'Active Event')
             
+            # --- REAL-TIME LEDGER BALANCE CALCULATION ---
+            previous_spend = 0
+            if os.path.exists(POS_FILE):
+                df_pos_calc = pd.read_csv(POS_FILE)
+                if not df_pos_calc.empty:
+                    # Sum all previous spending rows logged under this player's MemberID
+                    previous_spend = df_pos_calc[df_pos_calc['MemberID'] == target_id]['AmountKES'].sum()
+            
+            # Calculate remaining balance relative to their gate entry fee baseline footprint
+            current_net_folio = STANDARD_GATE_FEE - previous_spend
+            
             # Display informational profile context box to the server/cashier
             st.info(f"📋 **Verified Player Profile:** {target_name} | **Hcp:** {target_hcp} | **Active Field:** {target_comp}")
+            
+            # Visual Ledger Status Alert System for the Waiter
+            if current_net_folio >= 0:
+                st.success(f"💰 **Prepaid Gate Allowance Remaining:** KES {current_net_folio:,} (Initial Gate Credit: KES {STANDARD_GATE_FEE:,} | Already Spent: KES {previous_spend:,})")
+            else:
+                st.warning(f"⚠️ **Authorized Credit Tab Active (Overdraft):** KES {abs(current_net_folio):,} Over Limit (Initial Gate Credit: KES {STANDARD_GATE_FEE:,} | Total Spent: KES {previous_spend:,})")
             
             col1, col2 = st.columns(2)
             with col1:
@@ -65,7 +81,14 @@ if os.path.exists(LEADERBOARD_FILE):
                 }])
                 
                 new_txn.to_csv(POS_FILE, mode='a', header=False, index=False)
-                st.success(f"🎉 Posted KES {spend_amount:,} to {target_name}'s live event profile!")
+                
+                # Dynamic success toast alerts that verify if it went to credit tab
+                projected_balance = current_net_folio - spend_amount
+                if projected_balance >= 0:
+                    st.success(f"🎉 Posted KES {spend_amount:,} to {target_name}'s prepaid ledger footprint.")
+                else:
+                    st.warning(f"🚀 Limit Exceeded! Posted KES {spend_amount:,} to {target_name}'s accounts receivable credit tab.")
+                
                 st.rerun()
         else:
             st.info("Waiting for active players to check in at the gate scorecard portal.")
