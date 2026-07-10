@@ -1,0 +1,4 @@
+data/*.csv
+.streamlit/
+__pycache__/
+*.csv

@@ -75,29 +75,35 @@ Due to privacy constraints in private golf clubs, this project utilizes a combin
 ```bash
 FairwayIQ/
 │
-├── data/                            # Relational Data Lake
-│   ├── members.csv                  # Core Member Demographics
-│   ├── revenue.csv                  # Historical Financial Logs
-│   ├── engagement.csv               # Monthly Activity Metrics
-│   ├── member_status.csv            # Active / At-Risk / Churned Labels
-│   ├── live_leaderboard.csv         # Active Tournament Field Pool
-│   └── pos_transactions.csv         # Split Live-POS Logs (PlayDate & PlayTime)
+├── core/                            # 🧠 BACKEND PROCESSORS & DATABASE CORES
+│   ├── __init__.py                  # Python Module Marker
+│   ├── database.py                  # Relational Schema Migrations & DB Threads
+│   └── scoring_engine.py            # SQL Points Aggregation & Score Submissions
 │
-├── notebooks/                       # Data Science & Machine Learning Sandbox
+├── views/                           # 📊 FRONT-END STREAMLIT TERMINAL VIEWS
+│   ├── __init__.py                  # Python Module Marker
+│   ├── scorecard_terminal.py        # Player Score Input Interface & format variants
+│   ├── fandb_terminal.py            # Hospitality Folio POS Registry Console
+│   ├── leaderboard.py               # Combined Season Standings & TV Monitor 
+│   ├── tournament_ops.py            # Behind-the-Scenes Captain Control Center
+│   └── roster_manager.py            # External CSV / Google Sheets Sync Pipeline
+│
+├── data/                            # 💾 LOCAL SECURE DATA CORES
+│   ├── fairway_iq.db                # SQLite Relational Database Binary File
+│   ├── live_leaderboard.csv         # Legacy Live Tournament Stream Fallback
+│   └── pos_transactions.csv         # Auxiliary Clubhouse Spend Transaction Logs
+│
+├── notebooks/                       # 🔬 DATA SCIENCE & PREDICTIVE ANALYTICS
 │   ├── 01_FairwayIQ_EDA.ipynb       # Exploratory Analysis & Revenue Insights
-│   └── 02_Churn_Prediction.ipynb   # Predictive Churn Modeling (Upcoming)
+│   └── 02_Churn_Prediction.ipynb    # Predictive Machine Learning Churn Models
 │
-├── src/                             # Core ETL Logic
-│   └── generate_fairwayiq_data.py   # Synthetic Pipeline Generation Script
+├── src/                             # ⚙️ DATA ENGINEERING & PIPELINES
+│   └── generate_fairwayiq_data.py   # Synthetic Historical Generation Engine
 │
-├── output/                          # Machine Learning Pipeline Outputs
-│   └── fairwayiq_ml_dataset.csv     # Engineered Modeling Dataset
+├── output/                          # 📦 ENGINERED MODELLING STORAGE
+│   └── fairwayiq_ml_dataset.csv     # Transformed ML Processing Frame
 │
-├── hub.py                           # Master Dashboard Workspace Gateway (Port 8500)
-├── scorecard_app.py                 # On-Course Player Score Stepper (Port 8501)
-├── tournament_app.py                # Clubhouse TV Leaderboard Monitor (Port 8503)
-├── fandb_app.py                     # Front-of-House Hospitality Console (Port 8505)
-├── app.py                           # Legacy Core Initial Test Bed
-├── .gitignore                       # Deployment Filter (Blocks private local tracking data)
-├── requirements.txt                 # Project Dependencies Environment Setup
-└── README.md                        # Project Portfolio Documentation
+├── app.py                           # 🚀 Central Hub & Unified Workspace Controller
+├── .gitignore                       # Deployment Environmental Filter
+├── README.md                        # Portfolio Engineering Documentation
+└── requirements.txt                 # Project Dependencies Manifest
