@@ -42,8 +42,16 @@ if 'current_hole' not in st.session_state:
 if 'hole_scores' not in st.session_state:
     st.session_state.hole_scores = {h: LIMURU_PARS[h] for h in range(1, 19)}
 
+# Administrative persistent authentication state
+if 'admin_authenticated' not in st.session_state:
+    st.session_state.admin_authenticated = False
+# Master Control: Toggles whether the champion podium remains blank until the round finishes
+if 'suspense_mode' not in st.session_state:
+    st.session_state.suspense_mode = True
+
 # --- LINK ROUTER & CENTRAL SELECTION HUB ---
 query_params = st.query_params
+app_mode = None
 
 if "view" in query_params:
     url_view = query_params["view"]
@@ -56,18 +64,39 @@ if "view" in query_params:
     else:
         app_mode = "🏌️ Player Scorecard Portal"
 else:
-    st.sidebar.title("🏁 FairwayIQ Workspace")
-    app_mode = st.sidebar.selectbox(
-        "Select Interface Console:",
-        [
-            "🏌️ Player Scorecard Portal", 
-            "🍔 Clubhouse F&B Terminal", 
-            "🏆 Tournament Leaderboard Monitor",
-            "👥 Society Roster Manager"
-        ]
-    )
+    st.sidebar.title("🏁 FairwayIQ Gateway")
+    user_role = st.sidebar.radio("Select Portal Role:", ["🏌️ Golfer / Caddie Terminal", "🛡️ Tournament Administration"])
     st.sidebar.markdown("---")
-    st.sidebar.caption("⚡ System Administrator View")
+
+    if user_role == "🏌️ Golfer / Caddie Terminal":
+        app_mode = "🏌️ Player Scorecard Portal"
+        st.sidebar.success("Player Mode Active")
+    else:
+        # Secure the administrative side behind a quick entry PIN
+        admin_pin = st.sidebar.text_input("Enter Admin Operational PIN:", type="password")
+        if admin_pin == "1800":  # Clean numerical code for the society committee
+            st.session_state.admin_authenticated = True
+            
+            # Global Control Switches inside the admin menu sidebar
+            st.sidebar.subheader("🎛️ Live Field Controls")
+            st.session_state.suspense_mode = st.sidebar.toggle(
+                "🔒 Enable Suspense Mode", 
+                value=st.session_state.suspense_mode,
+                help="When enabled, hides the top 3 podium names from players until the tournament finishes."
+            )
+            st.sidebar.markdown("---")
+            
+            app_mode = st.sidebar.selectbox(
+                "Select Admin Console:",
+                [
+                    "🏆 Tournament Leaderboard Monitor",
+                    "👥 Society Roster Manager",
+                    "🍔 Clubhouse F&B Terminal"
+                ]
+            )
+        elif admin_pin != "":
+            st.sidebar.error("❌ Invalid Administrative PIN.")
+            app_mode = "🏌️ Player Scorecard Portal"
 
 # 🚦 CLEAN MODULE EXECUTION MATRIX via Import
 if app_mode == "🏌️ Player Scorecard Portal":
@@ -79,10 +108,11 @@ elif app_mode == "🍔 Clubhouse F&B Terminal":
     render_fb_pos(POS_FILE, DB_FILE)
 
 elif app_mode == "🏆 Tournament Leaderboard Monitor":
-    from views.leaderboard import render_tournament_monitor
-    render_tournament_monitor(DB_FILE, TOTAL_COURSE_PAR)
+    # Passing 'conn' for live SQL points and passing down the global suspense toggle state
+    from views.leaderboard import render_league_leaderboard
+    render_league_leaderboard(season_id="season_2026_01", conn=conn)
 
 elif app_mode == "👥 Society Roster Manager":
     from views.roster_manager import render_roster_uploader
-    # Placeholder session variable for active multi-tenant workflows
-    render_roster_uploader(season_id="season_2026_01", conn=None)
+    # Passing the live connection object straight into your SQLite data tier pipeline
+    render_roster_uploader(season_id="season_2026_01", conn=conn)
