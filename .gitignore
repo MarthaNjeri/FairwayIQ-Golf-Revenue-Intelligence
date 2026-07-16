@@ -1,4 +1,13 @@
-data/*.csv
-.streamlit/
+# Ignore local virtual environments
+.venv/
+venv/
 __pycache__/
+*.pyc
+
+# Ignore secret credentials 
+.streamlit/secrets.toml
+
+# Ignore ALL database files, CSV data, and spreadsheets
+*.db
 *.csv
+data/

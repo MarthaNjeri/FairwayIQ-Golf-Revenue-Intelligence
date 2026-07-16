@@ -2,14 +2,23 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
+import sqlite3
+from core.database import get_db_connection, get_course_pars_and_si
 
-def render_scorecard_input(DB_FILE, LIMURU_PARS):
+def render_scorecard_input(DB_FILE, FALLBACK_PARS):
     st.title("⛳ FairwayIQ Digital Scorecard & Live Database")
-    st.write("Welcome to the Limuru Country Club Scoring Portal. Please submit your round details below.")
+    st.write("Welcome to the Scoring Portal. Please select your course and submit your round details below.")
 
-    TOTAL_COURSE_PAR = sum(LIMURU_PARS.values())
+    conn = get_db_connection()
+    
+    # --- DYNAMIC COURSE DIRECTORY RETRIEVAL ---
+    try:
+        courses_df = pd.read_sql_query("SELECT DISTINCT course_name FROM golf_courses", conn)
+        course_options = courses_df['course_name'].tolist() if not courses_df.empty else ["Limuru Country Club"]
+    except Exception:
+        course_options = ["Limuru Country Club"]
 
-    # --- INITIALIZE STATE ENGINES ---
+    # --- SESSION STATE INITIALIZATION ---
     if 'authorized' not in st.session_state:
         st.session_state.authorized = False
     if 'auth_type' not in st.session_state:
@@ -20,22 +29,43 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
         st.session_state.player_id = 1
     if 'player_hcp' not in st.session_state:
         st.session_state.player_hcp = 10
-    if 'home_club' not in st.session_state:
-        st.session_state.home_club = "Limuru Country Club"
+    if 'selected_course' not in st.session_state:
+        st.session_state.selected_course = course_options[0]
+    if 'selected_tee' not in st.session_state:
+        st.session_state.selected_tee = "White"
     if 'competition' not in st.session_state:
         st.session_state.competition = "Casual Round"
     if 'current_hole' not in st.session_state:
         st.session_state.current_hole = 1
-    if 'hole_scores' not in st.session_state:
-        st.session_state.hole_scores = {h: LIMURU_PARS[h] for h in range(1, 19)}
     if 'round_variant' not in st.session_state:
-        st.session_state.round_variant = "Full 18 Holes" # Options: "Full 18 Holes" or "Front 9 Only"
+        st.session_state.round_variant = "Full 18 Holes"
+
+    # --- RESOLVE DYNAMIC COURSE DETAILS ---
+    try:
+        # Queries DB dynamically for current course context selection
+        raw_map = get_course_pars_and_si(st.session_state.selected_course, st.session_state.selected_tee)
+        if raw_map:
+            # Map structural coordinates for backwards compatibility
+            ACTIVE_PARS = {hole: val[0] for hole, val in raw_map.items()}
+            ACTIVE_SI = {hole: val[1] for hole, val in raw_map.items()}
+        else:
+            ACTIVE_PARS = FALLBACK_PARS
+            ACTIVE_SI = {h: h for h in range(1, 19)} # Basic fallback
+    except Exception:
+        ACTIVE_PARS = FALLBACK_PARS
+        ACTIVE_SI = {h: h for h in range(1, 19)}
+
+    # Ensure dynamic hole scores dictionary holds the correct dynamic par defaults
+    if 'hole_scores' not in st.session_state or len(st.session_state.hole_scores) != 18:
+        st.session_state.hole_scores = {h: ACTIVE_PARS.get(h, 4) for h in range(1, 19)}
+
+    TOTAL_COURSE_PAR = sum(ACTIVE_PARS.values())
 
     # --- PHASE 1: THE TOURNAMENT GATEKEEPER ---
     if not st.session_state.authorized:
         st.markdown("---")
         st.subheader("🔒 Tournament Gate Check-in")
-        st.write("Please select your registration type as designated at the entrance gate to unlock your portal view.")
+        st.write("Please select your registration type to unlock your portal view.")
         
         player_type = st.radio(
             "Select Registration Type:", 
@@ -47,6 +77,20 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
             input_id = st.number_input("Enter your Club Member ID:", min_value=1, max_value=9999, step=1)
             input_name = st.text_input("Enter Registered Full Name:")
             input_hcp = st.number_input("Verified Club Handicap:", min_value=0, max_value=54, value=12, step=1)
+            
+            # Dynamic Course Dropdowns inside registration
+            reg_course = st.selectbox("Select Golf Club Playing Today:", course_options, key="reg_course_member")
+            
+            # Query tees available for this course
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT h.tee_color FROM course_holes h
+                JOIN golf_courses c ON h.course_id = c.course_id
+                WHERE c.course_name = ?
+            """, (reg_course,))
+            available_tees = [r['tee_color'] for r in cursor.fetchall()] or ["White"]
+            reg_tee = st.selectbox("Select Tee Set Played:", available_tees, key="reg_tee_member")
+
             comp_type = st.selectbox("Select Active Competition:", ["NCBA Golf Series", "Casual Round", "Club Monthly Mug", "Chairman's Prize", "Member-Guest"])
             variant = st.selectbox("Select Planned Round Format:", ["Full 18 Holes", "Front 9 Only"])
             
@@ -57,16 +101,30 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
                     st.session_state.player_id = input_id
                     st.session_state.player_name = input_name
                     st.session_state.player_hcp = input_hcp
-                    st.session_state.home_club = "Limuru Country Club"
+                    st.session_state.selected_course = reg_course
+                    st.session_state.selected_tee = reg_tee
                     st.session_state.competition = comp_type
                     st.session_state.round_variant = variant
+                    # Reset dynamic scores with newly loaded course pars
+                    st.session_state.hole_scores = {h: ACTIVE_PARS.get(h, 4) for h in range(1, 19)}
                     st.rerun()
                 else:
                     st.error("Please enter your full name to verify membership profile.")
                     
         elif player_type == "Visiting Player":
             input_name = st.text_input("Visitor Full Name:")
-            selected_club = st.selectbox("Select Your Home Club:", ["Muthaiga Golf Club", "Karen Country Club", "Sigona Golf Club", "Royal Nairobi Golf Club"])
+            
+            # Dynamic Course Selector for Guests
+            reg_course = st.selectbox("Select Golf Club Playing Today:", course_options, key="reg_course_guest")
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT h.tee_color FROM course_holes h
+                JOIN golf_courses c ON h.course_id = c.course_id
+                WHERE c.course_name = ?
+            """, (reg_course,))
+            available_tees = [r['tee_color'] for r in cursor.fetchall()] or ["White"]
+            reg_tee = st.selectbox("Select Tee Set Played:", available_tees, key="reg_tee_guest")
+
             visitor_hcp = st.number_input("Official Handicap Index:", min_value=0, max_value=54, step=1)
             comp_type = st.selectbox("Select Active Competition:", ["NCBA Golf Series", "Casual Round", "Club Monthly Mug", "Chairman's Prize", "Member-Guest"])
             variant = st.selectbox("Select Planned Round Format:", ["Full 18 Holes", "Front 9 Only"])
@@ -78,9 +136,11 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
                     st.session_state.player_id = 9000 + visitor_hcp
                     st.session_state.player_name = input_name
                     st.session_state.player_hcp = visitor_hcp
-                    st.session_state.home_club = selected_club
+                    st.session_state.selected_course = reg_course
+                    st.session_state.selected_tee = reg_tee
                     st.session_state.competition = comp_type
                     st.session_state.round_variant = variant
+                    st.session_state.hole_scores = {h: ACTIVE_PARS.get(h, 4) for h in range(1, 19)}
                     st.rerun()
                 else:
                     st.error("Please enter your name to register as a visiting competitor.")
@@ -93,12 +153,16 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
             admin_pin = st.text_input("Enter Management Credentials / PIN:", type="password")
             
             if st.button("Authenticate Admin Console", type="primary"):
-                if admin_pin == "1234":
+                try:
+                    target_pin = st.secrets["admin"]["pin"]
+                except Exception:
+                    target_pin = "1234" # Fallback if local secrets is missing
+
+                if admin_pin == target_pin:
                     st.session_state.authorized = True
                     st.session_state.auth_type = "Admin"
                     st.session_state.player_id = 0
                     st.session_state.player_name = "System Administrator"
-                    st.session_state.home_club = "HQ Operations"
                     st.rerun()
                 else:
                     st.error("❌ Unauthorized Pin Allocation. Management access blocked.")
@@ -106,20 +170,87 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
     # --- PHASE 2: INTERFACE ROUTING ---
     else:
         st.markdown("---")
-        st.success(f"🔓 **Verified Access Granted ({st.session_state.auth_type}):** Welcome, {st.session_state.player_name} | Format: {st.session_state.round_variant}")
+        st.success(f"🔓 **Verified Access Granted ({st.session_state.auth_type}):** Welcome, {st.session_state.player_name} | Playing: **{st.session_state.selected_course}** ({st.session_state.selected_tee}) | Format: {st.session_state.round_variant}")
         
         if st.button("🔄 Logout / Reset Pipeline"):
             st.session_state.authorized = False
             st.session_state.auth_type = None
             st.session_state.current_hole = 1
-            st.session_state.hole_scores = {h: LIMURU_PARS[h] for h in range(1, 19)}
+            st.session_state.hole_scores = {h: ACTIVE_PARS.get(h, 4) for h in range(1, 19)}
             st.rerun()
 
         # ROUTE A: ADMIN PANEL
         if st.session_state.auth_type == "Admin":
             st.header("📊 FairwayIQ Executive Dashboard")
-            power_bi_url = "https://app.powerbi.com/view?r=eyJrIjoiYzMzYjA2ODEtYWUzNy00ZTYyLWI3MjMtZTM0Y2QzOWVhZWIwIiwidCI6ImNjZWM4MmJhLTA1OTctNDRjNy1hODM4LTEzNjIwY2MxZGJlYiJ9"
-            st.components.v1.iframe(power_bi_url, height=700, scrolling=True)
+            
+            # Dynamic Admin Tabs System
+            admin_tab1, admin_tab2, admin_tab3 = st.tabs([
+                "📈 PowerBI Live Analytics", 
+                "✏️ Correct / Edit Scorecards", 
+                "📤 Export KGU Match Records"
+            ])
+            
+            with admin_tab1:
+                power_bi_url = "https://app.powerbi.com/view?r=eyJrIjoiYzMzYjA2ODEtYWUzNy00ZTYyLWI3MjMtZTM0Y2QzOWVhZWIwIiwidCI6ImNjZWM4MmJhLTA1OTctNDRjNy1hODM4LTEzNjIwY2MxZGJlYiJ9"
+                st.components.v1.iframe(power_bi_url, height=700, scrolling=True)
+                
+            with admin_tab2:
+                st.subheader("✏️ Live Scorecard Override Grid")
+                st.write("Correct competitor score entry errors or typos directly below. Click **Save Operational Overrides** to apply your corrections to the leaderboard.")
+                
+                if os.path.exists(DB_FILE):
+                    try:
+                        df_editor = pd.read_csv(DB_FILE)
+                        if not df_editor.empty:
+                            # Spreadsheet-style editable table for score corrections
+                            edited_df = st.data_editor(
+                                df_editor,
+                                use_container_width=True,
+                                num_rows="dynamic",
+                                key="admin_live_scorecard_editor"
+                            )
+                            
+                            if st.button("Save Operational Overrides", type="primary"):
+                                edited_df.to_csv(DB_FILE, index=False)
+                                st.success("✅ Tournament leaderboards updated successfully with your changes!")
+                                st.rerun()
+                        else:
+                            st.info("No competitor records found in the scorecard database.")
+                    except Exception as e:
+                        st.error(f"Failed to read scorecard data sheet: {e}")
+                else:
+                    st.info("No scorecards have been recorded yet.")
+                    
+            with admin_tab3:
+                st.subheader("📤 Generate Handicap Union (WHS/KGU) Upload Sheet")
+                st.write("Review completed results and download the round report formatted for handicap union score uploads.")
+                
+                if os.path.exists(DB_FILE):
+                    try:
+                        df_export = pd.read_csv(DB_FILE)
+                        if not df_export.empty:
+                            # Standard ascending sorting based on gross scores
+                            clean_export_df = df_export.sort_values(by="Score", ascending=True)
+                            st.dataframe(clean_export_df, use_container_width=True)
+                            
+                            # CSV compiler configuration
+                            csv_export_bytes = clean_export_df.to_csv(index=False).encode('utf-8')
+                            file_stamp = datetime.today().strftime('%Y%m%d_%H%M')
+                            
+                            st.download_button(
+                                label="💾 Download KGU / Union Upload CSV File",
+                                data=csv_export_bytes,
+                                file_name=f"KGU_Tournament_Upload_{file_stamp}.csv",
+                                mime="text/csv",
+                                use_container_width=True,
+                                type="primary"
+                            )
+                        else:
+                            st.info("No active competitor round records to compile.")
+                    except Exception as e:
+                        st.error(f"Error compiling export report: {e}")
+                else:
+                    st.info("No active scorecard database file exists to export.")
 
         # ROUTE B: UPGRADED HOLE-BY-HOLE ENGINE
         else:
@@ -131,7 +262,7 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
             
             running_gross = sum(st.session_state.hole_scores[h] for h in relevant_holes)
             completed_holes = [h for h in relevant_holes if h < current_h]
-            par_completed = sum(LIMURU_PARS[h] for h in completed_holes)
+            par_completed = sum(ACTIVE_PARS.get(h, 4) for h in completed_holes)
             strokes_completed = sum(st.session_state.hole_scores[h] for h in completed_holes)
             relative_par = strokes_completed - par_completed
 
@@ -157,7 +288,8 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
                 st.subheader(f"🏌️ Active Interface: Hole {current_h}")
                 
                 c_card1, c_card2, c_card3 = st.columns(3)
-                c_card1.info(f"⛳ **Hole Par Allocation:** Par {LIMURU_PARS[current_h]}")
+                # DYNAMICALLY RENDER PARS AND STROKE INDEX FROM SQLite DATABASE
+                c_card1.info(f"⛳ **Hole Allocation:** Par **{ACTIVE_PARS.get(current_h, 4)}** | Stroke Index: **{ACTIVE_SI.get(current_h, current_h)}**")
                 c_card2.metric("Current Value Saved", f"{st.session_state.hole_scores[current_h]} Strokes")
                 c_card3.warning(f"🏆 **Event Class:** {st.session_state.competition}")
                 
@@ -215,7 +347,7 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
                         )
                     
                     with col_review2:
-                        st.text_input("Home Course Context:", value=st.session_state.home_club, disabled=True)
+                        st.text_input("Home Course Context:", value=st.session_state.selected_course, disabled=True)
                         st.number_input("System Verified Player Handicap Index:", value=st.session_state.player_hcp, disabled=True)
                         final_net_calc = running_gross - hcp_deduction
                         st.metric("Certified Net Finish Score", f"{int(final_net_calc)}")
@@ -226,7 +358,7 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
                         for idx, h_idx in enumerate(relevant_holes):
                             col_target = idx % 6
                             with grid_cols[col_target]:
-                                st.markdown(f"**H{h_idx}** `(Par {LIMURU_PARS[h_idx]})` \n### `{st.session_state.hole_scores[h_idx]}`")
+                                st.markdown(f"**H{h_idx}** `(Par {ACTIVE_PARS.get(h_idx, 4)})` \n### `{st.session_state.hole_scores[h_idx]}`")
 
                     final_commit = st.form_submit_button("🚀 Secure Transmit to Live Leaderboard Desk", type="primary", use_container_width=True)
 
@@ -238,7 +370,7 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
                             new_row_data = pd.DataFrame([{
                                 "MemberID": st.session_state.player_id,
                                 "PlayerName": f"{st.session_state.player_name} ({st.session_state.round_variant})",
-                                "Course": st.session_state.home_club,
+                                "Course": st.session_state.selected_course,
                                 "Handicap": hcp_deduction,
                                 "Score": running_gross,
                                 "Competition": st.session_state.competition,
@@ -246,11 +378,15 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
                                 "PlayDate": datetime.today().strftime('%Y-%m-%d %H:%M:%S')
                             }])
                             
-                            new_row_data.to_csv(DB_FILE, mode='a', header=False, index=False)
+                            os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+                            if os.path.exists(DB_FILE):
+                                new_row_data.to_csv(DB_FILE, mode='a', header=False, index=False)
+                            else:
+                                new_row_data.to_csv(DB_FILE, mode='w', header=True, index=False)
                             
                             st.success(f"📦 Pipeline Synchronized! Scorecard locked and logged. Marker Signature Token generated: UUID-[{marker_verification.replace(' ', '_')}]")
                             st.session_state.current_hole = 1
-                            st.session_state.hole_scores = {h: LIMURU_PARS[h] for h in range(1, 19)}
+                            st.session_state.hole_scores = {h: ACTIVE_PARS.get(h, 4) for h in range(1, 19)}
                             st.rerun()
 
     # --- PHASE 3: LIVE RE-RENDER VIEWPOOL ---
@@ -264,3 +400,5 @@ def render_scorecard_input(DB_FILE, LIMURU_PARS):
                     st.dataframe(df_view.sort_values(by="Score", ascending=True), use_container_width=True)
             except:
                 st.info("Leaderboard feed indexing.")
+
+    conn.close()

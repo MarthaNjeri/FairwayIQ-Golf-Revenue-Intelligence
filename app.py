@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
-from core.database import init_db, get_db_connection
+from core.database import init_db, get_db_connection, get_course_pars_and_si
 
 # 1. CONFIGURE GLOBAL WORKSPACE
 st.set_page_config(page_title="FairwayIQ Master Hub", page_icon="⛳", layout="wide")
@@ -15,12 +15,21 @@ conn = get_db_connection()
 DB_FILE = "data/live_leaderboard.csv"
 POS_FILE = "data/pos_transactions.csv"
 
-# Shared course reference configuration constants
-LIMURU_PARS = {
-    1: 4, 2: 4, 3: 3, 4: 5, 5: 4, 6: 4, 7: 3, 8: 4, 9: 5,
-    10: 4, 11: 4, 12: 3, 13: 5, 14: 4, 15: 4, 16: 3, 17: 4, 18: 5
-}
-TOTAL_COURSE_PAR = sum(LIMURU_PARS.values())
+# --- DYNAMIC COURSE SETUP ---
+# Dynamically fetch our default course pars from the database instead of hardcoding
+try:
+    # Defaults to Limuru Country Club (seeded in core/database.py)
+    dynamic_course_map = get_course_pars_and_si("Limuru Country Club", "White")
+    # Parse out {hole_number: par} for backward compatibility with the player scorecard views
+    ACTIVE_PARS = {hole: values[0] for hole, values in dynamic_course_map.items()}
+except Exception:
+    # Fallback default if database isn't fully updated yet
+    ACTIVE_PARS = {
+        1: 4, 2: 4, 3: 3, 4: 5, 5: 4, 6: 4, 7: 3, 8: 4, 9: 5,
+        10: 4, 11: 4, 12: 3, 13: 5, 14: 4, 15: 4, 16: 3, 17: 4, 18: 5
+    }
+
+TOTAL_COURSE_PAR = sum(ACTIVE_PARS.values())
 
 # --- IDENTITY STATE ENGINE ---
 if 'authorized' not in st.session_state:
@@ -40,7 +49,7 @@ if 'competition' not in st.session_state:
 if 'current_hole' not in st.session_state:
     st.session_state.current_hole = 1
 if 'hole_scores' not in st.session_state:
-    st.session_state.hole_scores = {h: LIMURU_PARS[h] for h in range(1, 19)}
+    st.session_state.hole_scores = {h: ACTIVE_PARS[h] for h in range(1, 19)}
 
 # Administrative persistent authentication state
 if 'admin_authenticated' not in st.session_state:
@@ -74,7 +83,14 @@ else:
     else:
         # Secure the administrative side behind a quick entry PIN
         admin_pin = st.sidebar.text_input("Enter Admin Operational PIN:", type="password")
-        if admin_pin == "1800":  # Clean numerical code for the society committee
+        
+        # Pull the secret PIN safely from local secrets.toml or cloud dashboard secrets
+        try:
+            target_pin = st.secrets["admin"]["pin"]
+        except Exception:
+            target_pin = "1800"  # Default fallback if secrets file is not yet built
+
+        if admin_pin == target_pin:
             st.session_state.admin_authenticated = True
             
             # Global Control Switches inside the admin menu sidebar
@@ -86,11 +102,14 @@ else:
             )
             st.sidebar.markdown("---")
             
+            # Master Admin Selection Menu
             app_mode = st.sidebar.selectbox(
                 "Select Admin Console:",
                 [
                     "🏆 Tournament Leaderboard Monitor",
                     "👥 Society Roster Manager",
+                    "⚙️ Tournament Match Play Control",
+                    "⚙️ Course Directory Setup",
                     "🍔 Clubhouse F&B Terminal"
                 ]
             )
@@ -98,21 +117,27 @@ else:
             st.sidebar.error("❌ Invalid Administrative PIN.")
             app_mode = "🏌️ Player Scorecard Portal"
 
-# 🚦 CLEAN MODULE EXECUTION MATRIX via Import
+# 🚦 MODULE EXECUTION ROUTER via Imports
 if app_mode == "🏌️ Player Scorecard Portal":
     from views.scorecard_terminal import render_scorecard_input
-    render_scorecard_input(DB_FILE, LIMURU_PARS)
+    render_scorecard_input(DB_FILE, ACTIVE_PARS)
 
 elif app_mode == "🍔 Clubhouse F&B Terminal":
     from views.fandb_terminal import render_fb_pos
     render_fb_pos(POS_FILE, DB_FILE)
 
 elif app_mode == "🏆 Tournament Leaderboard Monitor":
-    # Passing 'conn' for live SQL points and passing down the global suspense toggle state
     from views.leaderboard import render_league_leaderboard
-    render_league_leaderboard(season_id="season_2026_01", conn=conn)
+    render_league_leaderboard(season_id="2026_S1", conn=conn)
 
 elif app_mode == "👥 Society Roster Manager":
     from views.roster_manager import render_roster_uploader
-    # Passing the live connection object straight into your SQLite data tier pipeline
-    render_roster_uploader(season_id="season_2026_01", conn=conn)
+    render_roster_uploader(season_id="2026_S1", conn=conn)
+
+elif app_mode == "⚙️ Tournament Match Play Control":
+    from views.admin_panel import render_admin_panel
+    render_admin_panel()
+
+elif app_mode == "⚙️ Course Directory Setup":
+    from views.course_manager import render_course_manager
+    render_course_manager()
