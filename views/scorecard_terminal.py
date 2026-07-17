@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import sqlite3
 from core.database import get_db_connection, get_course_pars_and_si
@@ -346,142 +346,220 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                 else:
                     st.info("No active scorecard database file exists to export.")
 
-        # ROUTE B: UPGRADED HOLE-BY-HOLE ENGINE
+        # ROUTE B: UPGRADED HOLE-BY-HOLE ENGINE (Now wraps around dual tabs for players!)
         else:
-            current_h = st.session_state.current_hole
-            
-            # Filter active data limits based on variant constraints (1-9 or 1-18)
-            active_hole_limit = 9 if st.session_state.round_variant == "Front 9 Only" else 18
-            relevant_holes = range(1, active_hole_limit + 1)
-            
-            running_gross = sum(st.session_state.hole_scores[h] for h in relevant_holes)
-            completed_holes = [h for h in relevant_holes if h < current_h]
-            par_completed = sum(ACTIVE_PARS.get(h, 4) for h in completed_holes)
-            strokes_completed = sum(st.session_state.hole_scores[h] for h in completed_holes)
-            relative_par = strokes_completed - par_completed
+            player_tab1, player_tab2 = st.tabs(["📝 Record Live Scorecard", "🍔 Pre-Order to the Turn"])
 
-            # Dynamic Stats Top Bar
-            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-            col_m1.metric("Hole Timeline", f"{current_h if current_h <= active_hole_limit else active_hole_limit} / {active_hole_limit}")
-            col_m2.metric("Running Gross", f"{running_gross} Strokes")
-            
-            if current_h == 1:
-                score_fmt = "Even"
-            else:
-                score_fmt = f"+{relative_par}" if relative_par > 0 else ("Even" if relative_par == 0 else f"{relative_par}")
-            col_m3.metric("To Par (Live)", score_fmt)
-            
-            # Apply adjusted handicap rating for 9-hole submissions (halved handicap)
-            hcp_deduction = st.session_state.player_hcp / 2 if st.session_state.round_variant == "Front 9 Only" else st.session_state.player_hcp
-            col_m4.metric("Net Projected", f"{int(running_gross - hcp_deduction)}")
-
-            st.markdown("---")
-
-            # ENGINE STATE 1: GOLFER IS RUNNING THE FAIRWAYS
-            if current_h <= active_hole_limit:
-                st.subheader(f"🏌️ Active Interface: Hole {current_h}")
+            with player_tab1:
+                current_h = st.session_state.current_hole
                 
-                c_card1, c_card2, c_card3 = st.columns(3)
-                # DYNAMICALLY RENDER PARS AND STROKE INDEX FROM SQLite DATABASE
-                c_card1.info(f"⛳ **Hole Allocation:** Par **{ACTIVE_PARS.get(current_h, 4)}** | Stroke Index: **{ACTIVE_SI.get(current_h, current_h)}**")
-                c_card2.metric("Current Value Saved", f"{st.session_state.hole_scores[current_h]} Strokes")
-                c_card3.warning(f"🏆 **Event Class:** {st.session_state.competition}")
+                # Filter active data limits based on variant constraints (1-9 or 1-18)
+                active_hole_limit = 9 if st.session_state.round_variant == "Front 9 Only" else 18
+                relevant_holes = range(1, active_hole_limit + 1)
                 
-                # Interactive Step Adjustments
-                hcp_strokes = st.number_input(
-                    "Input Score for Current Hole (Gross Strokes):",
-                    min_value=1, max_value=15, 
-                    value=int(st.session_state.hole_scores[current_h]), 
-                    step=1, key=f"input_h_{current_h}"
-                )
-                st.session_state.hole_scores[current_h] = hcp_strokes
+                running_gross = sum(st.session_state.hole_scores[h] for h in relevant_holes)
+                completed_holes = [h for h in relevant_holes if h < current_h]
+                par_completed = sum(ACTIVE_PARS.get(h, 4) for h in completed_holes)
+                strokes_completed = sum(st.session_state.hole_scores[h] for h in completed_holes)
+                relative_par = strokes_completed - par_completed
 
-                # Control Row Execution
-                st.write("")
-                b_col1, b_col2 = st.columns(2)
-                with b_col1:
-                    if current_h > 1:
-                        if st.button("⬅️ Previous Hole Position", use_container_width=True):
-                            st.session_state.current_hole -= 1
-                            st.rerun()
-                with b_col2:
-                    if current_h < active_hole_limit:
-                        if st.button("Save & Advance Hole ➡️", use_container_width=True):
-                            st.session_state.current_hole += 1
-                            st.rerun()
-                    else:
-                        btn_label = "🏁 Transition to 9-Hole Review" if active_hole_limit == 9 else "🏁 Transition to 18th Hole Review"
-                        if st.button(btn_label, type="primary", use_container_width=True):
-                            st.session_state.current_hole = 19 # Triggers Review Engine
-                            st.rerun()
-                            
-                # Mid-Round Safety Valve: Allow players who chose 18 holes to safely clock out early at hole 9
-                if current_h == 9 and st.session_state.round_variant == "Full 18 Holes":
+                # Dynamic Stats Top Bar
+                col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+                col_m1.metric("Hole Timeline", f"{current_h if current_h <= active_hole_limit else active_hole_limit} / {active_hole_limit}")
+                col_m2.metric("Running Gross", f"{running_gross} Strokes")
+                
+                if current_h == 1:
+                    score_fmt = "Even"
+                else:
+                    score_fmt = f"+{relative_par}" if relative_par > 0 else ("Even" if relative_par == 0 else f"{relative_par}")
+                col_m3.metric("To Par (Live)", score_fmt)
+                
+                # Apply adjusted handicap rating for 9-hole submissions (halved handicap)
+                hcp_deduction = st.session_state.player_hcp / 2 if st.session_state.round_variant == "Front 9 Only" else st.session_state.player_hcp
+                col_m4.metric("Net Projected", f"{int(running_gross - hcp_deduction)}")
+
+                st.markdown("---")
+
+                # ENGINE STATE 1: GOLFER IS RUNNING THE FAIRWAYS
+                if current_h <= active_hole_limit:
+                    st.subheader(f"🏌️ Active Interface: Hole {current_h}")
+                    
+                    c_card1, c_card2, c_card3 = st.columns(3)
+                    # DYNAMICALLY RENDER PARS AND STROKE INDEX FROM SQLite DATABASE
+                    c_card1.info(f"⛳ **Hole Allocation:** Par **{ACTIVE_PARS.get(current_h, 4)}** | Stroke Index: **{ACTIVE_SI.get(current_h, current_h)}**")
+                    c_card2.metric("Current Value Saved", f"{st.session_state.hole_scores[current_h]} Strokes")
+                    c_card3.warning(f"🏆 **Event Class:** {st.session_state.competition}")
+                    
+                    # Interactive Step Adjustments
+                    hcp_strokes = st.number_input(
+                        "Input Score for Current Hole (Gross Strokes):",
+                        min_value=1, max_value=15, 
+                        value=int(st.session_state.hole_scores[current_h]), 
+                        step=1, key=f"input_h_{current_h}"
+                    )
+                    st.session_state.hole_scores[current_h] = hcp_strokes
+
+                    # Control Row Execution
                     st.write("")
-                    if st.button("⚠️ Clock Out Early (Submit Front 9 Only)", use_container_width=True):
-                        st.session_state.round_variant = "Front 9 Only"
-                        st.session_state.current_hole = 19
-                        st.rerun()
-
-            # ENGINE STATE 2: THE CARD COMPLETED REVIEW SCREEN
-            else:
-                st.balloons()
-                st.success(f"🎉 **{st.session_state.round_variant} Green Cleared! Score Registry Compiled.**")
-                st.markdown("### 📋 Final Championship Card Matrix Review")
-                
-                with st.form("database_submission_form"):
-                    col_review1, col_review2 = st.columns(2)
-                    
-                    with col_review1:
-                        st.text_input("Competitor Profile Name:", value=st.session_state.player_name, disabled=True)
-                        st.number_input("Final Consolidated Gross Score:", value=running_gross, disabled=True)
-                        marker_verification = st.selectbox(
-                            "🔒 Select Attesting Flight Competitor (Official Marker Signature):",
-                            ["Choose official marker...", "John Mwangi", "Alice Koech", "David Ochieng", "Martha Njeri", "Peter Kamau"]
-                        )
-                    
-                    with col_review2:
-                        st.text_input("Home Course Context:", value=st.session_state.selected_course, disabled=True)
-                        st.number_input("System Verified Player Handicap Index:", value=st.session_state.player_hcp, disabled=True)
-                        final_net_calc = running_gross - hcp_deduction
-                        st.metric("Certified Net Finish Score", f"{int(final_net_calc)}")
-
-                    # Expandable hole grid verification display mapping only played context rows
-                    with st.expander(f"🔍 Audit Detailed {st.session_state.round_variant} Matrix Map"):
-                        grid_cols = st.columns(6)
-                        for idx, h_idx in enumerate(relevant_holes):
-                            col_target = idx % 6
-                            with grid_cols[col_target]:
-                                st.markdown(f"**H{h_idx}** `(Par {ACTIVE_PARS.get(h_idx, 4)})` \n### `{st.session_state.hole_scores[h_idx]}`")
-
-                    final_commit = st.form_submit_button("🚀 Secure Transmit to Live Leaderboard Desk", type="primary", use_container_width=True)
-
-                    if final_commit:
-                        if marker_verification == "Choose official marker...":
-                            st.error("⚠️ **R&A Verification Rule Violation:** Scorecard rejects entry. You must assign an attesting playing partner marker to authenticate the tournament record.")
+                    b_col1, b_col2 = st.columns(2)
+                    with b_col1:
+                        if current_h > 1:
+                            if st.button("⬅️ Previous Hole Position", use_container_width=True):
+                                st.session_state.current_hole -= 1
+                                st.rerun()
+                    with b_col2:
+                        if current_h < active_hole_limit:
+                            if st.button("Save & Advance Hole ➡️", use_container_width=True):
+                                st.session_state.current_hole += 1
+                                st.rerun()
                         else:
-                            # Append directly into shared file infrastructure 
-                            new_row_data = pd.DataFrame([{
-                                "MemberID": st.session_state.player_id,
-                                "PlayerName": f"{st.session_state.player_name} ({st.session_state.round_variant})",
-                                "Course": st.session_state.selected_course,
-                                "Handicap": hcp_deduction,
-                                "Score": running_gross,
-                                "Competition": st.session_state.competition,
-                                "MarkerVerification": marker_verification,
-                                "PlayDate": datetime.today().strftime('%Y-%m-%d %H:%M:%S')
-                            }])
-                            
-                            os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
-                            if os.path.exists(DB_FILE):
-                                new_row_data.to_csv(DB_FILE, mode='a', header=False, index=False)
-                            else:
-                                new_row_data.to_csv(DB_FILE, mode='w', header=True, index=False)
-                            
-                            st.success(f"📦 Pipeline Synchronized! Scorecard locked and logged. Marker Signature Token generated: UUID-[{marker_verification.replace(' ', '_')}]")
-                            st.session_state.current_hole = 1
-                            st.session_state.hole_scores = {h: ACTIVE_PARS.get(h, 4) for h in range(1, 19)}
+                            btn_label = "🏁 Transition to 9-Hole Review" if active_hole_limit == 9 else "🏁 Transition to 18th Hole Review"
+                            if st.button(btn_label, type="primary", use_container_width=True):
+                                st.session_state.current_hole = 19 # Triggers Review Engine
+                                st.rerun()
+                                
+                    # Mid-Round Safety Valve: Allow players who chose 18 holes to safely clock out early at hole 9
+                    if current_h == 9 and st.session_state.round_variant == "Full 18 Holes":
+                        st.write("")
+                        if st.button("⚠️ Clock Out Early (Submit Front 9 Only)", use_container_width=True):
+                            st.session_state.round_variant = "Front 9 Only"
+                            st.session_state.current_hole = 19
                             st.rerun()
+
+                # ENGINE STATE 2: THE CARD COMPLETED REVIEW SCREEN
+                else:
+                    st.balloons()
+                    st.success(f"🎉 **{st.session_state.round_variant} Green Cleared! Score Registry Compiled.**")
+                    st.markdown("### 📋 Final Championship Card Matrix Review")
+                    
+                    with st.form("database_submission_form"):
+                        col_review1, col_review2 = st.columns(2)
+                        
+                        with col_review1:
+                            st.text_input("Competitor Profile Name:", value=st.session_state.player_name, disabled=True)
+                            st.number_input("Final Consolidated Gross Score:", value=running_gross, disabled=True)
+                            marker_verification = st.selectbox(
+                                "🔒 Select Attesting Flight Competitor (Official Marker Signature):",
+                                ["Choose official marker...", "John Mwangi", "Alice Koech", "David Ochieng", "Martha Njeri", "Peter Kamau"]
+                            )
+                        
+                        with col_review2:
+                            st.text_input("Home Course Context:", value=st.session_state.selected_course, disabled=True)
+                            st.number_input("System Verified Player Handicap Index:", value=st.session_state.player_hcp, disabled=True)
+                            final_net_calc = running_gross - hcp_deduction
+                            st.metric("Certified Net Finish Score", f"{int(final_net_calc)}")
+
+                        # Expandable hole grid verification display mapping only played context rows
+                        with st.expander(f"🔍 Audit Detailed {st.session_state.round_variant} Matrix Map"):
+                            grid_cols = st.columns(6)
+                            for idx, h_idx in enumerate(relevant_holes):
+                                col_target = idx % 6
+                                with grid_cols[col_target]:
+                                    st.markdown(f"**H{h_idx}** `(Par {ACTIVE_PARS.get(h_idx, 4)})` \n### `{st.session_state.hole_scores[h_idx]}`")
+
+                        final_commit = st.form_submit_button("🚀 Secure Transmit to Live Leaderboard Desk", type="primary", use_container_width=True)
+
+                        if final_commit:
+                            if marker_verification == "Choose official marker...":
+                                st.error("⚠️ **R&A Verification Rule Violation:** Scorecard rejects entry. You must assign an attesting playing partner marker to authenticate the tournament record.")
+                            else:
+                                # Append directly into shared file infrastructure 
+                                new_row_data = pd.DataFrame([{
+                                    "MemberID": st.session_state.player_id,
+                                    "PlayerName": f"{st.session_state.player_name} ({st.session_state.round_variant})",
+                                    "Course": st.session_state.selected_course,
+                                    "Handicap": hcp_deduction,
+                                    "Score": running_gross,
+                                    "Competition": st.session_state.competition,
+                                    "MarkerVerification": marker_verification,
+                                    "PlayDate": datetime.today().strftime('%Y-%m-%d %H:%M:%S')
+                                }])
+                                
+                                os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+                                if os.path.exists(DB_FILE):
+                                    new_row_data.to_csv(DB_FILE, mode='a', header=False, index=False)
+                                else:
+                                    new_row_data.to_csv(DB_FILE, mode='w', header=True, index=False)
+                                
+                                st.success(f"📦 Pipeline Synchronized! Scorecard locked and logged. Marker Signature Token generated: UUID-[{marker_verification.replace(' ', '_')}]")
+                                st.session_state.current_hole = 1
+                                st.session_state.hole_scores = {h: ACTIVE_PARS.get(h, 4) for h in range(1, 19)}
+                                st.rerun()
+
+            # =====================================================================
+            # TAB 2: 📱 QR THE TURN PRE-ORDER SYSTEM
+            # =====================================================================
+            with player_tab2:
+                st.subheader("🍔 Fast-Track Clubhouse & Turn Pre-Ordering")
+                st.write("Beat the Halfway House queue! Order food while on the course. It will be waiting for you hot at the Turn.")
+
+                # Menu Options aligned with fandb_terminal
+                MENU_ITEMS = {
+                    "🍺 Tusker / White Cap Lager": {"price": 400, "cogs": 180},
+                    "🥪 Club Sandwich & French Fries": {"price": 850, "cogs": 280},
+                    "🥟 Halfway House Samosas (Pair)": {"price": 300, "cogs": 90},
+                    "☕ Premium House Coffee": {"price": 350, "cogs": 70},
+                    "💧 Mayer's Mineral Water (500ml)": {"price": 150, "cogs": 40}
+                }
+
+                col_ord1, col_ord2 = st.columns(2)
+                with col_ord1:
+                    current_hole = st.selectbox(
+                        "📍 Where are you on the course right now?", 
+                        [f"Hole {h}" for h in range(1, 19)], 
+                        index=max(0, min(17, st.session_state.current_hole - 1))  # Sync with active scorecard hole!
+                    )
+                    billing_type = st.radio("Charging Account Allocation:", ["Direct Member Folio", "Caddy Voucher", "Guest Chit"])
+
+                with col_ord2:
+                    selected_food = st.selectbox("Select Samosa/Beverage Option:", list(MENU_ITEMS.keys()))
+                    qty = st.number_input("Quantity:", min_value=1, max_value=10, value=1)
+                    
+                    # Predictive Pace-of-Play ETA Calculation (Approx 15 mins per hole remaining to the turn)
+                    hole_num = int(current_hole.split(" ")[1])
+                    if hole_num <= 9:
+                        holes_remaining = 9 - hole_num
+                        pickup_location = "Ready at Hole 9 Turn"
+                    else:
+                        holes_remaining = 18 - hole_num
+                        pickup_location = "Ready at 19th Hole Lounge Table"
+
+                    eta_minutes = max(10, holes_remaining * 15)  # Guarantees a baseline 10 minute prep warning
+                    predicted_pickup = datetime.now() + timedelta(minutes=eta_minutes)
+                    
+                    st.info(f"🕒 **Fulfillment Target:** {pickup_location} | **Pickup ETA:** {predicted_pickup.strftime('%H:%M')} (In {eta_minutes} mins)")
+
+                if st.button("Confirm & Post Pre-Order", type="primary"):
+                    # Prepare transaction row
+                    txn_id = f"TXN-QR-{int(datetime.timestamp(datetime.now()))}"
+                    price = MENU_ITEMS[selected_food]["price"] * qty
+                    cogs = MENU_ITEMS[selected_food]["cogs"] * qty
+                    now = datetime.now()
+
+                    new_txn = pd.DataFrame([{
+                        "TransactionID": txn_id,
+                        "MemberID": st.session_state.player_id,
+                        "PlayerName": st.session_state.player_name,
+                        "PointOfSale": "On-Course Mobile QR",
+                        "AmountKES": price,
+                        "COGS": cogs,
+                        "PlayDate": now.strftime('%Y-%m-%d'),
+                        "PlayTime": now.strftime('%H:%M:%S'),
+                        "BillingType": billing_type,
+                        "ServedBy": "Mobile Pre-Order",
+                        "FulfilmentPoint": pickup_location,
+                        "PickupETA": predicted_pickup.strftime('%H:%M')
+                    }])
+
+                    POS_FILE = "data/pos_transactions.csv"
+                    os.makedirs(os.path.dirname(POS_FILE), exist_ok=True)
+                    if os.path.exists(POS_FILE):
+                        new_txn.to_csv(POS_FILE, mode='a', header=False, index=False)
+                    else:
+                        new_txn.to_csv(POS_FILE, mode='w', header=True, index=False)
+
+                    st.balloons()
+                    st.success(f"🎉 Order Posted! KES {price:,} charged via {billing_type}. Your food will be prepped hot and ready at the Turn around {predicted_pickup.strftime('%H:%M')}!")
 
     # --- PHASE 3: LIVE RE-RENDER VIEWPOOL ---
     if st.session_state.authorized and st.session_state.auth_type != "Admin":
