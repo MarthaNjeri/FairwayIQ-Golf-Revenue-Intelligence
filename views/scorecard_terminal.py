@@ -5,13 +5,94 @@ import os
 import sqlite3
 from core.database import get_db_connection, get_course_pars_and_si
 
+# --- DICTIONARY OF OFFICIAL KGU-AFFILIATED CLUBS BY REGION ---
+KENYAN_GOLF_CLUBS = {
+    "Nairobi Region": [
+        "Golf Park", "Karen Country Club", "Kenya Airforce Golf Club", "Kenya Railway Golf Course",
+        "Kiambu Golf Club", "Limuru Country Club", "Machakos Golf Club", "Muthaiga Golf Club",
+        "Ndumberi Golf Club", "Royal Nairobi Golf Club", "Ruiru Sports Club", "Sigona Golf Club",
+        "Thika Barracks Golf Club", "Thika Greens Golf Resort", "Thika Sports Club", "VetLab Sports Club",
+        "Windsor Golf Hotel & Country Club", "Migaa Golf Club"
+    ],
+    "Mt. Kenya Region": [
+        "Nanyuki Sports Club", "Nyahururu Country Club", "Nyeri Golf Club"
+    ],
+    "Central Rift": [
+        "Gilgil Country Club", "Great Rift Valley Golf Resort", "Naivasha Sports Club", 
+        "Nakuru Golf Club", "Njoro Country Club", "Mt. Kipipiri Golf Resort"
+    ],
+    "Coast": [
+        "Leisure Lodge Golf Club", "Malindi Golf Club", "Mombasa Golf Club", 
+        "Nyali Golf & Country Club Ltd", "Vipingo Ridge"
+    ],
+    "Western": [
+        "Kakamega Golf Club", "Kisii Golf Club", "Mumias Golf Club", "Nyanza Golf Club"
+    ],
+    "North Rift": [
+        "Eldoret Golf Club", "Kericho Golf Course", "Kitale Club", "Nandi Bears Golf Club"
+    ]
+}
+
+# Flatten the list for "Home Club" select boxes
+ALL_KENYAN_CLUBS_FLAT = sorted([club for region in KENYAN_GOLF_CLUBS.values() for club in region])
+
+# --- MOST COMMON KENYAN TOURNAMENTS & SERIES ---
+KENYAN_COMPETITIONS = [
+    # 1. Weekly & Monthly Club Fixtures
+    "Club Nite (Stableford)", 
+    "Club Monthly Mug", 
+    # 2. Corporate Golf Days
+    "NCBA Golf Series", 
+    "KCB Golf Series", 
+    "ABSA Golf Day", 
+    "ICEA Lion Golf Tournament", 
+    "Britam Golf Series", 
+    "CIC Golf Day", 
+    "Safaricom Golf Day",
+    # 3. Golf Societies
+    "Kachumbari Golf League", 
+    "Kenya Ladies Golf Union societies", 
+    "Corporate societies", 
+    "Alumni societies", 
+    "Professional associations", 
+    "Rotary golf events",
+    # 4. KAGC Amateur Majors & Club Opens
+    "Sigona Open (KAGC)", 
+    "Muthaiga Open (KAGC)", 
+    "Karen Open (KAGC)", 
+    "Nakuru Open (KAGC)", 
+    "Limuru Open (KAGC)", 
+    "Nyali Open (KAGC)", 
+    "Kiambu Open (KAGC)", 
+    "Machakos Open (KAGC)", 
+    "Ulinzi Invitational (KAGC)", 
+    "Thika Sports Open",
+    # 5. Elite Majors & Development Tours
+    "Magical Kenya Open (DP World Tour)", 
+    "Sunshine Development Tour – East Africa Swing",
+    # 6. Prestigious Annual Club Events
+    "Lady Captain's Prize",
+    "Ladies Invitationals",
+    "Eileen Belcher Trophy",
+    "Captain's Prize",
+    "Chairman's Prize",
+    # 7. Sponsor Invitationals
+    "ABSA Invitational",
+    "NCBA Invitational",
+    "Kenya Airways Golf Day",
+    "Coca-Cola Golf Day",
+    "CFAO Golf Tournament",
+    "Diageo/EABL Golf Day",
+    "Casual Round"
+]
+
 def render_scorecard_input(DB_FILE, FALLBACK_PARS):
     st.title("⛳ FairwayIQ Digital Scorecard & Live Database")
     st.write("Welcome to the Scoring Portal. Please select your course and submit your round details below.")
 
     conn = get_db_connection()
     
-    # --- DYNAMIC COURSE DIRECTORY RETRIEVAL ---
+    # --- DYNAMIC COURSE DIRECTORY RETRIEVAL (Venue playing at today) ---
     try:
         courses_df = pd.read_sql_query("SELECT DISTINCT course_name FROM golf_courses", conn)
         course_options = courses_df['course_name'].tolist() if not courses_df.empty else ["Limuru Country Club"]
@@ -78,8 +159,12 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
             input_name = st.text_input("Enter Registered Full Name:")
             input_hcp = st.number_input("Verified Club Handicap:", min_value=0, max_value=54, value=12, step=1)
             
-            # Dynamic Course Dropdowns inside registration
-            reg_course = st.selectbox("Select Golf Club Playing Today:", course_options, key="reg_course_member")
+            # Dynamic Region and Course dropdowns inside registration
+            col_reg1, col_reg2 = st.columns(2)
+            with col_reg1:
+                region_choice = st.selectbox("Select Club Region:", list(KENYAN_GOLF_CLUBS.keys()))
+            with col_reg2:
+                reg_course = st.selectbox("Select Golf Club Playing Today:", KENYAN_GOLF_CLUBS[region_choice], key="reg_course_member")
             
             # Query tees available for this course
             cursor = conn.cursor()
@@ -91,7 +176,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
             available_tees = [r['tee_color'] for r in cursor.fetchall()] or ["White"]
             reg_tee = st.selectbox("Select Tee Set Played:", available_tees, key="reg_tee_member")
 
-            comp_type = st.selectbox("Select Active Competition:", ["NCBA Golf Series", "Casual Round", "Club Monthly Mug", "Chairman's Prize", "Member-Guest"])
+            comp_type = st.selectbox("Select Active Competition / Event:", KENYAN_COMPETITIONS, key="reg_comp_member")
             variant = st.selectbox("Select Planned Round Format:", ["Full 18 Holes", "Front 9 Only"])
             
             if st.button("Verify & Unlock Scorecard", type="primary"):
@@ -114,8 +199,16 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
         elif player_type == "Visiting Player":
             input_name = st.text_input("Visitor Full Name:")
             
-            # Dynamic Course Selector for Guests
-            reg_course = st.selectbox("Select Golf Club Playing Today:", course_options, key="reg_course_guest")
+            # Select Visitor's actual home club in Kenya
+            visitor_home_club = st.selectbox("Select Your Official Home Club:", ALL_KENYAN_CLUBS_FLAT)
+            
+            # Select Playing venue dynamically via region lookup
+            col_v1, col_v2 = st.columns(2)
+            with col_v1:
+                region_choice = st.selectbox("Select Playing Club Region:", list(KENYAN_GOLF_CLUBS.keys()))
+            with col_v2:
+                reg_course = st.selectbox("Select Venue Playing Today:", KENYAN_GOLF_CLUBS[region_choice], key="reg_course_guest")
+            
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT DISTINCT h.tee_color FROM course_holes h
@@ -126,7 +219,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
             reg_tee = st.selectbox("Select Tee Set Played:", available_tees, key="reg_tee_guest")
 
             visitor_hcp = st.number_input("Official Handicap Index:", min_value=0, max_value=54, step=1)
-            comp_type = st.selectbox("Select Active Competition:", ["NCBA Golf Series", "Casual Round", "Club Monthly Mug", "Chairman's Prize", "Member-Guest"])
+            comp_type = st.selectbox("Select Active Competition / Event:", KENYAN_COMPETITIONS, key="reg_comp_guest")
             variant = st.selectbox("Select Planned Round Format:", ["Full 18 Holes", "Front 9 Only"])
             
             if st.button("Register Guest Competitor", type="primary"):
@@ -134,7 +227,8 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     st.session_state.authorized = True
                     st.session_state.auth_type = "Visitor"
                     st.session_state.player_id = 9000 + visitor_hcp
-                    st.session_state.player_name = input_name
+                    # Append visitor home club in parentheses to Player Name
+                    st.session_state.player_name = f"{input_name} ({visitor_home_club})"
                     st.session_state.player_hcp = visitor_hcp
                     st.session_state.selected_course = reg_course
                     st.session_state.selected_tee = reg_tee
