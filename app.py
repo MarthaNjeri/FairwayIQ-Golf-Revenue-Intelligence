@@ -176,3 +176,16 @@ elif app_mode == "enable final 3hole":
 elif app_mode == "⚙️ Course Directory Setup":
     from views.course_manager import render_course_manager
     render_course_manager()
+    # =====================================================================
+# 🏁 GLOBAL FOOTER & COPYRIGHT (Place at the absolute end of app.py)
+# =====================================================================
+st.markdown("---")
+st.markdown(
+    """
+    <div style="text-align: center; color: #888888; font-size: 0.85em; margin-top: 30px;">
+        © 2026 <b>FairwayIQ</b>. All Rights Reserved.<br>
+        <span style="font-size: 0.9em;">Designed & Developed by Martha Ngaithe</span>
+    </div>
+    """, 
+    unsafe_allow_html=True
+)
