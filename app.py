@@ -53,6 +53,14 @@ if 'staff_authenticated' not in st.session_state:
 if 'suspense_mode' not in st.session_state:
     st.session_state.suspense_mode = True
 
+# Initialize state variables for our three direct administrative toggles
+if 'enable_overrides' not in st.session_state:
+    st.session_state.enable_overrides = False
+if 'enable_podium' not in st.session_state:
+    st.session_state.enable_podium = False
+if 'enable_shootout' not in st.session_state:
+    st.session_state.enable_shootout = False
+
 # --- LINK ROUTER & CENTRAL SELECTION HUB ---
 query_params = st.query_params
 app_mode = None
@@ -70,7 +78,7 @@ if "view" in query_params:
 else:
     st.sidebar.title("🏁 FairwayIQ Gateway")
     
-    # 🌟 NEW: Clubhouse F&B Terminal is now directly on the main role options!
+    # Clubhouse F&B Terminal sits directly on the main role options
     user_role = st.sidebar.radio(
         "Select Portal Role:", 
         [
@@ -118,15 +126,36 @@ else:
         if admin_pin == target_pin:
             st.session_state.admin_authenticated = True
             
+            # --- 🎛️ SIDEBAR TOGGLES (THE LIVE FIELD CONTROLS) ---
             st.sidebar.subheader("🎛️ Live Field Controls")
+            
             st.session_state.suspense_mode = st.sidebar.toggle(
                 "🔒 Enable Suspense Mode", 
                 value=st.session_state.suspense_mode,
                 help="When enabled, hides the top 3 podium names from players until the tournament finishes."
             )
+            
+            st.session_state.enable_overrides = st.sidebar.toggle(
+                "🛠️ Captain's Desk Overrides",
+                value=st.session_state.enable_overrides,
+                help="Toggle on to adjust active player profiles, playing handicaps, and round configurations."
+            )
+            
+            st.session_state.enable_podium = st.sidebar.toggle(
+                "🏆 Review Podium Winners Now",
+                value=st.session_state.enable_podium,
+                help="Toggle on to auto-calculate Best Gross, Best Net, and Net Runner-Up."
+            )
+            
+            st.session_state.enable_shootout = st.sidebar.toggle(
+                "🏁 Enable Final 3-Hole Playoff",
+                value=st.session_state.enable_shootout,
+                help="Toggle on to run a sudden-death playoff scorecard tracker on Holes 16, 17, and 18."
+            )
+            
             st.sidebar.markdown("---")
             
-            # Master Admin Selection Menu without the F&B option (it is on the main landing now!)
+            # Master Admin Selection Menu (Cleaned of overrides/podium/shootout options)
             app_mode = st.sidebar.selectbox(
                 "Select Admin Console:",
                 [
@@ -161,22 +190,29 @@ elif app_mode == "⚙️ Tournament Match Play Control":
     from views.admin_panel import render_admin_panel
     render_admin_panel(admin_mode=None, DB_FILE=DB_FILE)
 
-elif app_mode == "🛠️ Captain's Desk Overrides":
-    from views.admin_panel import render_admin_panel
-    render_admin_panel(admin_mode="🛠️ Captain's Desk Overrides", DB_FILE=DB_FILE)
-
-elif app_mode == "Review podium winners":
-    from views.admin_panel import render_admin_panel
-    render_admin_panel(admin_mode="Review podium winners", DB_FILE=DB_FILE)
-
-elif app_mode == "enable final 3hole":
-    from views.admin_panel import render_admin_panel
-    render_admin_panel(admin_mode="enable final 3hole", DB_FILE=DB_FILE)
-
 elif app_mode == "⚙️ Course Directory Setup":
     from views.course_manager import render_course_manager
     render_course_manager()
-    # =====================================================================
+
+# --- DYNAMIC PERSISTENT OVERLAYS ---
+# Render these modules concurrently when toggled inside active administrative sessions
+if st.session_state.get("admin_authenticated", False):
+    if st.session_state.get("enable_overrides", False):
+        from views.admin_panel import render_admin_panel
+        st.markdown("---")
+        render_admin_panel(admin_mode="🛠️ Captain's Desk Overrides", DB_FILE=DB_FILE)
+        
+    if st.session_state.get("enable_podium", False):
+        from views.admin_panel import render_admin_panel
+        st.markdown("---")
+        render_admin_panel(admin_mode="Review podium winners", DB_FILE=DB_FILE)
+        
+    if st.session_state.get("enable_shootout", False):
+        from views.admin_panel import render_admin_panel
+        st.markdown("---")
+        render_admin_panel(admin_mode="enable final 3hole", DB_FILE=DB_FILE)
+
+# =====================================================================
 # 🏁 GLOBAL FOOTER & COPYRIGHT (Place at the absolute end of app.py)
 # =====================================================================
 st.markdown("---")
