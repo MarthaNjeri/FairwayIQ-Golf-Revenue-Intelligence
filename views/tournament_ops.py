@@ -1,238 +1,227 @@
-import streamlit as st
-import pandas as pd
-import datetime
 import os
 import time
+import pandas as pd
+import streamlit as st
 
-def render_check_in(season_id: str, conn=None):
-    st.title("⛳ FairwayIQ Tournament Center")
-    st.subheader("Limuru Country Club - Live Scoring Dashboard")
+DATA_PATH = "data/live_leaderboard.csv"
+LEADERBOARD_COLS = [
+    "MemberID", "PlayerName", "Course", "Handicap", "Score",
+    "Competition", "Team", "Format", "MarkerVerification", "PlayDate"
+]
 
-    # --- STEP 1: PARSE THE USER'S CURRENT VIEW MODE FROM THE URL ---
-    current_view = st.query_params.get("view", "standard")
 
-    # --- STEP 2: CENTRAL FILE REFERENCE CONTEXT ---
-    DATA_PATH = "data/live_leaderboard.csv"
+def _get_admin_pin():
+    try:
+        return st.secrets["admin"]["pin"]
+    except Exception:
+        return "1800"
+
+
+def _load_scores():
     os.makedirs(os.path.dirname(DATA_PATH), exist_ok=True)
+    if not os.path.exists(DATA_PATH):
+        return pd.DataFrame(columns=LEADERBOARD_COLS)
 
     try:
-        df_scores = pd.read_csv(DATA_PATH)
-    except FileNotFoundError:
-        data = {
-            'MemberID': ['M1001', 'M1002', 'M1003', 'M1004', 'M1005'],
-            'PlayerName': ['John Mwangi', 'Alice Koech', 'David Ochieng', 'Martha Njeri', 'Peter Kamau'],
-            'Course': ['Limuru Country Club'] * 5,
-            'Handicap': [4, 10, 12, 2, 15],
-            'Score': [74, 79, 82, 72, 85],
-            'Competition': ['NCBA Golf Series'] * 5,
-            'MarkerVerification': ['David Ochieng', 'John Mwangi', 'Alice Koech', 'Peter Kamau', 'Martha Njeri'],
-            'PlayDate': [str(datetime.datetime.now())] * 5
-        }
-        df_scores = pd.DataFrame(data)
-        df_scores.to_csv(DATA_PATH, index=False)
+        df = pd.read_csv(DATA_PATH, engine="python", on_bad_lines="skip")
+        df.columns = df.columns.str.strip()
+    except Exception:
+        return pd.DataFrame(columns=LEADERBOARD_COLS)
 
-    # --- STEP 3: DATA MATRICES ALIGNMENT ---
-    df_scores.columns = df_scores.columns.str.strip()
+    if "Team" not in df.columns:
+        df["Team"] = "Individual"
+    if "Format" not in df.columns:
+        df["Format"] = "Full 18 Holes"
+    if "MarkerVerification" not in df.columns:
+        df["MarkerVerification"] = ""
+    if "PlayDate" not in df.columns:
+        df["PlayDate"] = ""
+    return df
 
-    score_col = next((c for c in ['Score', 'Gross_Score', 'Gross Score', 'score', 'gross_score'] if c in df_scores.columns), None)
-    hcp_col = next((c for c in ['Handicap', 'handicap', 'HCP', 'hcp'] if c in df_scores.columns), None)
-    name_col = next((c for c in ['PlayerName', 'Name', 'name', 'Player', 'player', 'Member_Name'] if c in df_scores.columns), None)
 
-    if score_col and hcp_col:
-        df_scores['Gross_Score'] = df_scores[score_col].astype(float)
-        df_scores['Handicap'] = df_scores[hcp_col].astype(float)
-        df_scores['Net_Score'] = df_scores['Gross_Score'] - df_scores['Handicap']
-    else:
-        df_scores['Gross_Score'] = 80
-        df_scores['Handicap'] = 10
-        df_scores['Net_Score'] = 70
+def _normalize(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
 
-    df_scores['Name'] = df_scores[name_col] if name_col else "Unknown Player"
-    df_scores = df_scores.sort_values(by='Net_Score').reset_index(drop=True)
+    score_col = next((c for c in ["Score", "Gross_Score", "Gross Score", "score"] if c in df.columns), None)
+    hcp_col = next((c for c in ["Handicap", "handicap", "HCP", "hcp"] if c in df.columns), None)
+    name_col = next((c for c in ["PlayerName", "Name", "Player", "player"] if c in df.columns), None)
 
-    # --- STEP 4: TOURNAMENT STATE MANAGEMENT ---
-    if 'tournament_locked' not in st.session_state:
+    out = df.copy()
+    out["Gross_Score"] = pd.to_numeric(out[score_col], errors="coerce") if score_col else 80
+    out["Handicap"] = pd.to_numeric(out[hcp_col], errors="coerce") if hcp_col else 10
+    out["Gross_Score"] = out["Gross_Score"].fillna(80)
+    out["Handicap"] = out["Handicap"].fillna(10)
+    out["Net_Score"] = out["Gross_Score"] - out["Handicap"]
+    out["Name"] = out[name_col] if name_col else "Unknown Player"
+    out["Format"] = out["Format"] if "Format" in out.columns else "Full 18 Holes"
+    out["Team"] = out["Team"] if "Team" in out.columns else "Individual"
+    out = out.sort_values(by="Net_Score").reset_index(drop=True)
+    out["Position"] = out.index + 1
+    return out
+
+
+def render_check_in(season_id: str, conn=None):
+    st.title("FairwayIQ Tournament Center")
+    st.caption("Live scoring, spectator view, and clubhouse TV leaderboard")
+
+    current_view = st.query_params.get("view", "standard")
+    df_raw = _load_scores()
+    df_scores = _normalize(df_raw)
+
+    if "tournament_locked" not in st.session_state:
         st.session_state.tournament_locked = False
-    if 'admin_verified' not in st.session_state:
+    if "admin_verified" not in st.session_state:
         st.session_state.admin_verified = False
-    if 'suspense_mode' not in st.session_state:
+    if "suspense_mode" not in st.session_state:
         st.session_state.suspense_mode = False
 
-    # --- STEP 5: SECURE CONTROL DESK (Hidden for Spectators & TVs) ---
     if current_view == "standard":
-        st.sidebar.header("🛠️ Tournament Control Desk")
-
+        st.sidebar.header("Tournament Control Desk")
         if not st.session_state.admin_verified:
-            st.sidebar.write("🔒 Enter Official Credentials to unlock modifications.")
-            official_pin = st.sidebar.text_input("Club Captain / Admin PIN:", type="password", key="t_ops_admin_pin")
-            
+            official_pin = st.sidebar.text_input("Admin PIN:", type="password", key="t_ops_admin_pin")
             if st.sidebar.button("Verify Official Access", key="t_ops_verify_btn"):
-                if official_pin == "1234":
+                if official_pin == _get_admin_pin():
                     st.session_state.admin_verified = True
-                    st.sidebar.success("Access Granted!")
                     st.rerun()
                 else:
-                    st.sidebar.error("❌ Invalid PIN. Action Blocked.")
+                    st.sidebar.error("Invalid PIN")
         else:
-            st.sidebar.success("🔑 Certified Official Mode Active")
-            
+            st.sidebar.success("Certified Official Mode Active")
             st.session_state.suspense_mode = st.sidebar.toggle(
-                "🔒 Activate Final 3 Holes Suspense", 
+                "Final 3 Holes Suspense",
                 value=st.session_state.suspense_mode
             )
-            if st.session_state.suspense_mode:
-                st.sidebar.warning("Suspense Active: Standings are artificially frozen for non-admins!")
-            
-            st.sidebar.write("---")
             if not st.session_state.tournament_locked:
-                if st.sidebar.button("🔒 Finalize Tournament & Lock Scores", type="primary", key="t_ops_lock_btn"):
+                if st.sidebar.button("Finalize Tournament & Lock Scores", type="primary"):
                     st.session_state.tournament_locked = True
                     st.rerun()
             else:
-                if st.sidebar.button("🔄 Re-open Live Scoring", key="t_ops_unlock_btn"):
+                if st.sidebar.button("Re-open Live Scoring"):
                     st.session_state.tournament_locked = False
                     st.rerun()
-                    
-            if st.sidebar.button("🚪 Lock Control Desk", key="t_ops_logout_btn"):
+            if st.sidebar.button("Lock Control Desk"):
                 st.session_state.admin_verified = False
                 st.rerun()
 
-        st.sidebar.write("---")
-        st.sidebar.subheader("📺 Quick View Links")
-        if st.sidebar.button("Switch to Read-Only Spectator View", key="link_spec_btn"):
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Quick Views")
+        if st.sidebar.button("Spectator View"):
             st.query_params["view"] = "spectator"
             st.rerun()
-        if st.sidebar.button("Switch to Clubhouse TV Screen View", key="link_tv_btn"):
+        if st.sidebar.button("Clubhouse TV View"):
             st.query_params["view"] = "tv"
             st.rerun()
-
-    elif current_view in ["spectator", "tv"]:
-        if st.sidebar.button("⬅️ Return to Main App", key="t_ops_return_btn"):
+    else:
+        if st.sidebar.button("Return to Main App"):
             st.query_params.clear()
             st.rerun()
 
-    # --- FEATURE: SUSPENSE MODIFIER ---
-    if st.session_state.suspense_mode and not st.session_state.admin_verified:
-        df_display = df_scores.copy()
-        df_display['Name'] = df_display['Name'] + " (Holes 16-18 Masked)"
-    else:
-        df_display = df_scores.copy()
+    df_display = df_scores.copy()
+    if st.session_state.suspense_mode and not st.session_state.admin_verified and not df_display.empty:
+        df_display.loc[df_display.index < 3, "Name"] = "Leader (Hidden)"
 
-    # =========================================================================
-    # --- TV ENVIRONMENT VIEW LAYOUT BRANCH ---
-    # =========================================================================
+    show_cols = [c for c in [
+        "Position", "Name", "Gross_Score", "Handicap", "Net_Score",
+        "Format", "Team", "Course", "Competition"
+    ] if c in df_display.columns]
+
     if current_view == "tv":
-        st.markdown("<style>div.block-container{padding-top:1rem;}</style>", unsafe_allow_html=True)
-        st.title("🏆 FAIRWAYIQ CLUBHOUSE LIVE LEADERBOARD")
-        st.subheader("Limuru Country Club — Dining Room Display")
-        
-        current_time_block = int(time.time())
-        sponsor_index = (current_time_block // 10) % 3
-        
-        st.markdown("---")
-        if sponsor_index == 0:
-            st.markdown("<div style='background-color:#EAF2F8; padding:15px; border-radius:10px; text-align:center;'><h2>⚡ Official Connectivity Partner: <span style='color:#4CAF50;'>SAFARICOM</span></h2></div>", unsafe_allow_html=True)
-        elif sponsor_index == 1:
-            st.markdown("<div style='background-color:#FEF9E7; padding:15px; border-radius:10px; text-align:center;'><h2>🍻 Refreshments at the 19th Hole: <span style='color:#E67E22;'>EABL / TUSKER</span></h2></div>", unsafe_allow_html=True)
+        st.title("FAIRWAYIQ LIVE LEADERBOARD")
+        st.subheader("Limuru Country Club — Clubhouse Display")
+        sponsors = [
+            ("SAFARICOM", "#EAF2F8", "#16a34a"),
+            ("EABL / TUSKER", "#FEF9E7", "#E67E22"),
+            ("NCBA BANK", "#E8F8F5", "#117A65"),
+        ]
+        name, bg, color = sponsors[int(time.time() // 8) % 3]
+        st.markdown(
+            f"<div style='background:{bg};padding:14px;border-radius:10px;text-align:center;'>"
+            f"<h3>Official Partner: <span style='color:{color};'>{name}</span></h3></div>",
+            unsafe_allow_html=True
+        )
+        if df_display.empty:
+            st.info("Waiting for live scores...")
         else:
-            st.markdown("<div style='background-color:#E8F8F5; padding:15px; border-radius:10px; text-align:center;'><h2>🏦 Premium Banking Partner: <span style='color:#117A65;'>NCBA BANK</span></h2></div>", unsafe_allow_html=True)
-        st.markdown("---")
-        
-        st.write("### Current Standings")
-        st.dataframe(df_display[['Name', 'Gross_Score', 'Handicap', 'Net_Score']], use_container_width=True)
-        
-        time.sleep(10)
+            st.dataframe(df_display[show_cols], use_container_width=True, hide_index=True)
+        st.caption("Auto-refreshing clubhouse view")
+        time.sleep(3)
         st.rerun()
+        return
 
-    # =========================================================================
-    # --- STANDARD SPECTATOR ENVIRONMENT VIEW LAYOUT BRANCH ---
-    # =========================================================================
-    else:
-        if current_view == "spectator":
-            st.info("👁️ Viewing in READ-ONLY Spectator Mode. Score submission gates locked.")
+    if current_view == "spectator":
+        st.info("Read-only Spectator Mode")
 
-        if not st.session_state.tournament_locked:
-            if st.session_state.suspense_mode and not st.session_state.admin_verified:
-                st.warning("⚠️ FINAL HOLE SUSPENSE ENGAGED: Live computations are locked for the final stretch drama.")
-            else:
-                st.success("🟢 TOURNAMENT ACTIVE: Scores are live-populating from member phones.")
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Field Size", f"{len(df_display)} Players")
-            
-            if not df_display.empty:
-                col2.metric("Current Leader Net", f"{int(df_display['Net_Score'].min())} Net")
-                col3.metric("Average Net Score", f"{int(df_display['Net_Score'].mean())}")
-            
-            st.write("### Current Standings")
-            st.dataframe(df_display[['Name', 'Gross_Score', 'Handicap', 'Net_Score']], use_container_width=True)
+    if df_display.empty:
+        st.warning("No scores submitted yet. Players should complete Gate Check-in and submit a scorecard.")
+        return
 
+    formats = ["All"] + sorted(df_display["Format"].dropna().astype(str).unique().tolist())
+    chosen = st.selectbox("Show format", formats)
+    view_df = df_display if chosen == "All" else df_display[df_display["Format"].astype(str) == chosen]
+    view_df = view_df.sort_values("Net_Score").reset_index(drop=True)
+    view_df["Position"] = view_df.index + 1
+
+    if not st.session_state.tournament_locked:
+        if st.session_state.suspense_mode and not st.session_state.admin_verified:
+            st.warning("Suspense Mode: top positions are hidden.")
         else:
-            st.balloons() 
-            st.error("🏆 TOURNAMENT CONCLUDED - FINAL RESULTS LOCKED")
-            
-            winner = df_scores.iloc[0]
-            second = df_scores.iloc[1] if len(df_scores) > 1 else None
-            third = df_scores.iloc[2] if len(df_scores) > 2 else None
-            
-            st.markdown("## 👑 The Championship Podium")
-            podium_col1, podium_col2, podium_col3 = st.columns(3)
-            
-            with podium_col2:
-                st.markdown(
-                    f"""
-                    <div style="background-color:#D4AF37; padding:20px; border-radius:15px; text-align:center; color:black;">
-                        <h3>🥇 1st Place (CHAMPION)</h3>
-                        <h2>{winner['Name']}</h2>
-                        <h1>{int(winner['Net_Score'])} Net</h1>
-                        <p>Gross: {int(winner['Gross_Score'])} | HCP: {int(winner['Handicap'])}</p>
-                        <p style="font-weight:bold; font-size:1.2em;">🎁 Prize: Customized Titleist Driver & Club Trophy</p>
-                    </div>
-                    """, 
-                    unsafe_allow_html=True
-                )
-                
-            with podium_col1:
-                if second is not None:
-                    st.markdown(
-                        f"""
-                        <div style="background-color:#C0C0C0; padding:20px; border-radius:15px; text-align:center; color:black; margin-top:30px;">
-                            <h3>🥈 2nd Place</h3>
-                            <h3>{second['Name']}</h3>
-                            <h2>{int(second['Net_Score'])} Net</h2>
-                            <p>Gross: {int(second['Gross_Score'])} | HCP: {int(second['Handicap'])}</p>
-                            <p>🎁 Prize: Ksh 15,000 Pro-Shop Voucher</p>
-                        </div>
-                        """, 
-                        unsafe_allow_html=True
-                    )
-                    
-            with podium_col3:
-                if third is not None:
-                    st.markdown(
-                        f"""
-                        <div style="background-color:#CD7F32; padding:20px; border-radius:15px; text-align:center; color:black; margin-top:45px;">
-                            <h3>🥉 3rd Place</h3>
-                            <h3>{third['Name']}</h3>
-                            <h2>{int(third['Net_Score'])} Net</h2>
-                            <p>Gross: {int(third['Gross_Score'])} | HCP: {int(third['Handicap'])}</p>
-                            <p>🎁 Prize: Dozen Srixon Golf Balls</p>
-                        </div>
-                        """, 
-                        unsafe_allow_html=True
-                    )
+            st.success("Tournament Active — live scores updating")
 
-            st.write("---")
-            st.write("### Complete Final Standings")
-            st.dataframe(df_scores[['Name', 'Gross_Score', 'Handicap', 'Net_Score']], use_container_width=True)
-            # This block checks if the file is being run directly by Streamlit
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Field Size", f"{len(view_df)}")
+        c2.metric("Leader Net", f"{int(view_df['Net_Score'].min())}" if not view_df.empty else "-")
+        c3.metric("Average Net", f"{int(view_df['Net_Score'].mean())}" if not view_df.empty else "-")
+
+        st.subheader("Current Standings")
+        st.dataframe(view_df[show_cols], use_container_width=True, hide_index=True)
+    else:
+        st.success("Tournament Concluded — Results Locked")
+        if view_df.empty:
+            st.info("No players in this format.")
+            return
+
+        winner = view_df.iloc[0]
+        second = view_df.iloc[1] if len(view_df) > 1 else None
+        third = view_df.iloc[2] if len(view_df) > 2 else None
+
+        st.markdown("## Championship Podium")
+        p1, p2, p3 = st.columns(3)
+        with p2:
+            st.markdown(f"""
+            <div style="background:#D4AF37;padding:20px;border-radius:15px;text-align:center;">
+                <h3>1st Place</h3>
+                <h2>{winner['Name']}</h2>
+                <h1>{int(winner['Net_Score'])} Net</h1>
+                <p>Gross {int(winner['Gross_Score'])} | HCP {int(winner['Handicap'])}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        with p1:
+            if second is not None:
+                st.markdown(f"""
+                <div style="background:#C0C0C0;padding:20px;border-radius:15px;text-align:center;margin-top:30px;">
+                    <h3>2nd Place</h3>
+                    <h3>{second['Name']}</h3>
+                    <h2>{int(second['Net_Score'])} Net</h2>
+                </div>
+                """, unsafe_allow_html=True)
+        with p3:
+            if third is not None:
+                st.markdown(f"""
+                <div style="background:#CD7F32;padding:20px;border-radius:15px;text-align:center;margin-top:45px;">
+                    <h3>3rd Place</h3>
+                    <h3>{third['Name']}</h3>
+                    <h2>{int(third['Net_Score'])} Net</h2>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.subheader("Final Standings")
+        st.dataframe(view_df[show_cols], use_container_width=True, hide_index=True)
+
+
 if __name__ == "__main__":
-    # 1. Provide a standalone page layout config
     try:
-        st.set_page_config(page_title="FairwayIQ Independent Tournament Desk", layout="wide")
-    except st.errors.StreamlitAPIException:
-        # Failsafe if page config was somehow already set
+        st.set_page_config(page_title="FairwayIQ Tournament Desk", layout="wide")
+    except Exception:
         pass
-
-    # 2. Fire the execution node independently with dummy parameter contexts
-    render_check_in(season_id="standalone_test_season", conn=None)
+    render_check_in(season_id="2026_S1", conn=None)

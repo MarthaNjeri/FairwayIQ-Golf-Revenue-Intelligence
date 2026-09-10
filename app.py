@@ -177,19 +177,46 @@ def require_role(allowed_roles: list):
 
 
 # ============================================================
-# 6. GATEWAY / LOGIN (Centered Professional Design)
+# ============================================================
+# 6. GATEWAY / LOGIN
 # ============================================================
 app_mode = None
 
-# Show login gateway only if user is not authenticated
-if not (st.session_state.get("authorized") or 
-        st.session_state.get("staff_authenticated") or 
+if not (st.session_state.get("authorized") or
+        st.session_state.get("staff_authenticated") or
         st.session_state.get("admin_authenticated")):
 
     st.markdown("""
         <style>
         .stApp {
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            background:
+                linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)),
+                url("https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&w=1600")
+                center/cover no-repeat fixed;
+            animation: fairwayFade 22s ease-in-out infinite;
+        }
+        @keyframes fairwayFade {
+            0%, 30% {
+                background-image:
+                    linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)),
+                    url("https://images.unsplash.com/photo-1535131749006-b7f58c99034b?auto=format&fit=crop&w=1600");
+            }
+            35%, 65% {
+                background-image:
+                    linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)),
+                    url("https://images.unsplash.com/photo-1587174486073-ae5e5cff23aa?auto=format&fit=crop&w=1600");
+            }
+            70%, 100% {
+                background-image:
+                    linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)),
+                    url("https://images.unsplash.com/photo-1587178964428-1c623c097668?auto=format&fit=crop&w=1600");
+            }
+        }
+        label, [data-testid="stWidgetLabel"] p { color: #0f172a !important; }
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            background: rgba(255,255,255,0.96) !important;
+            border: 1px solid #e2e8f0 !important;
+            border-radius: 16px !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -198,46 +225,42 @@ if not (st.session_state.get("authorized") or
 
     with col2:
         st.markdown("""
-            <div style="text-align: center; margin-top: 40px; margin-bottom: 20px;">
-                <h1 style="color: #4ade80; font-size: 2.4rem; font-weight: 700; margin-bottom: 6px;">
-                    ⛳ FairwayIQ
+            <div style="text-align: center; margin-top: 16px; margin-bottom: 12px;">
+                <h1 style="color: #0b3d2e; font-size: 2.2rem; font-weight: 700; margin-bottom: 4px;">
+                    FairwayIQ
                 </h1>
-                <p style="color: #94a3b8; font-size: 1.05rem;">
+                <p style="color: #334155; font-size: 1rem;">
                     Golf Revenue & Operations Intelligence
                 </p>
             </div>
         """, unsafe_allow_html=True)
 
         with st.container(border=True):
-            st.markdown("### 🏁 FairwayIQ Gateway")
+            st.markdown("### FairwayIQ Gateway")
             st.caption("Select Portal Role to continue")
 
             user_role = st.selectbox(
                 "Select Portal Role:",
                 [
-                    "🏌️ Golfer / Caddie Terminal",
-                    "🍔 Clubhouse F&B Terminal",
-                    "🛡️ Tournament Administration"
+                    "Golfer / Caddie Terminal",
+                    "Clubhouse F&B Terminal",
+                    "Tournament Administration"
                 ],
                 label_visibility="collapsed"
             )
 
             st.markdown("---")
 
-            # GOLFER
-            if user_role == "🏌️ Golfer / Caddie Terminal":
+            if user_role == "Golfer / Caddie Terminal":
                 from views.gate_checkin import render_gate_checkin
                 render_gate_checkin()
 
-            # F&B STAFF
-            elif user_role == "🍔 Clubhouse F&B Terminal":
+            elif user_role == "Clubhouse F&B Terminal":
                 staff_pin = st.text_input("Enter F&B Staff PIN", type="password", placeholder="Enter PIN")
-
                 try:
                     target_staff_pin = st.secrets["staff"]["pin"]
                 except Exception:
                     target_staff_pin = "2026"
-
                 if st.button("Login to F&B Terminal", type="primary", use_container_width=True):
                     if staff_pin == target_staff_pin:
                         st.session_state.staff_authenticated = True
@@ -246,15 +269,12 @@ if not (st.session_state.get("authorized") or
                     else:
                         st.error("Invalid Staff PIN")
 
-            # ADMIN
             else:
                 admin_pin = st.text_input("Enter Admin Operational PIN", type="password", placeholder="Enter PIN")
-
                 try:
                     target_pin = st.secrets["admin"]["pin"]
                 except Exception:
                     target_pin = "1800"
-
                 if st.button("Login to Admin Console", type="primary", use_container_width=True):
                     if admin_pin == target_pin:
                         st.session_state.admin_authenticated = True
@@ -263,27 +283,20 @@ if not (st.session_state.get("authorized") or
                     else:
                         st.error("Invalid Administrative PIN")
 
-        st.markdown("""
-            <div style="text-align: center; margin-top: 25px; color: #64748b; font-size: 0.85rem;">
-                © 2026 FairwayIQ · Designed & Developed by Martha Ngaithe
-            </div>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            "<div style='text-align:center;margin-top:25px;color:#64748b;font-size:0.85rem;'>© 2026 FairwayIQ · Designed & Developed by Martha Ngaithe</div>",
+            unsafe_allow_html=True
+        )
 
-    st.stop()   # Critical: stop here until user logs in
-
-
+    st.stop()
+# 7. AFTER LOGIN
 # ============================================================
-# 7. AFTER LOGIN - SHOW SIDEBAR + CONTENT
-# ============================================================
-
-# Activate PWA only after login
 enable_pwa_with_offline_cache(
     player_id=st.session_state.player_id,
     current_hole=st.session_state.current_hole,
     current_scores=st.session_state.hole_scores
 )
 
-# Sidebar after login
 st.sidebar.title("⛳ FairwayIQ")
 st.sidebar.success(f"Logged in as: **{st.session_state.auth_type.upper()}**")
 
@@ -294,7 +307,6 @@ if st.sidebar.button("🚪 Logout"):
 
 st.sidebar.markdown("---")
 
-# Determine app_mode based on role
 if st.session_state.auth_type == "player":
     app_mode = "🏌️ Player Scorecard Portal"
 
@@ -333,7 +345,7 @@ else:
 
 
 # ============================================================
-# 8. MODULE ROUTER + ROLE PROTECTION
+# 8. MODULE ROUTER
 # ============================================================
 if app_mode == "🏌️ Player Scorecard Portal":
     require_role(["player", "admin"])
