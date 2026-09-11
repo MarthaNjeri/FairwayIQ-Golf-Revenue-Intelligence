@@ -226,7 +226,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
         "authorized": False, "auth_type": None, "player_name": "", "player_id": 1,
         "player_hcp": 12, "selected_course": course_options[0], "selected_tee": "White",
         "competition": "Casual Round", "current_hole": 1, "round_variant": "Full 18 Holes",
-        "scorecard_submitted": False, "playing_partners": "Individual",
+        "scorecard_submitted": False, "playing_partners": "Individual", "hole_times": {},
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -262,7 +262,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
             input_id = st.number_input("Enter your Club Member ID:", min_value=1, max_value=9999, step=1)
             input_name = st.text_input("Enter Registered Full Name:")
             input_hcp = st.number_input("Verified Club Handicap:", min_value=0, max_value=54, value=12, step=1)
-            partners_in = st.text_input("Playing partners / team (optional)", placeholder="e.g. John Mwangi, Alice Koech")
+            partners_in = st.text_input("Playing partners / team (optional)", placeholder="e.g. Flight A")
             c1, c2 = st.columns(2)
             with c1:
                 region = st.selectbox("Select Club Region:", list(KENYAN_GOLF_CLUBS.keys()))
@@ -285,6 +285,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     st.session_state.round_variant = variant
                     st.session_state.scorecard_submitted = False
                     st.session_state.current_hole = 1
+                    st.session_state.hole_times = {}
                     st.session_state.hole_scores = {h: ACTIVE_PARS.get(h, 4) for h in range(1, 19)}
                     st.rerun()
                 else:
@@ -292,7 +293,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
         elif player_type == "Visiting Player":
             input_name = st.text_input("Visitor Full Name:")
             visitor_home = st.selectbox("Select Your Official Home Club:", ALL_KENYAN_CLUBS_FLAT)
-            partners_in = st.text_input("Playing partners / team (optional)", placeholder="e.g. John Mwangi, Alice Koech")
+            partners_in = st.text_input("Playing partners / team (optional)", placeholder="e.g. Flight A")
             c1, c2 = st.columns(2)
             with c1:
                 region = st.selectbox("Select Playing Club Region:", list(KENYAN_GOLF_CLUBS.keys()))
@@ -315,6 +316,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     st.session_state.competition = comp_type
                     st.session_state.round_variant = variant
                     st.session_state.scorecard_submitted = False
+                    st.session_state.hole_times = {}
                     st.rerun()
                 else:
                     st.error("Please enter your name.")
@@ -342,6 +344,7 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
         st.session_state.auth_type = None
         st.session_state.scorecard_submitted = False
         st.session_state.current_hole = 1
+        st.session_state.hole_times = {}
         st.rerun()
 
     if st.session_state.auth_type == "Admin":
@@ -370,10 +373,6 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
             try:
                 hist = pd.read_csv(DB_FILE, engine="python", on_bad_lines="skip")
                 hist.columns = hist.columns.str.strip()
-                if "Team" not in hist.columns:
-                    hist["Team"] = "Individual"
-                if "Format" not in hist.columns:
-                    hist["Format"] = "Full 18 Holes"
                 if hist.empty:
                     st.info("No scores yet.")
                 else:
@@ -384,27 +383,12 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
         else:
             st.info("No leaderboard file yet.")
 
-        st.subheader("My scoring trend")
-        if not hist.empty and "PlayerName" in hist.columns:
-            mine = hist[hist["PlayerName"].astype(str) == str(display_name)].copy()
-            if mine.empty:
-                st.info("No previous rounds for this player yet.")
-            else:
-                st.dataframe(mine, use_container_width=True, hide_index=True)
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Rounds posted", len(mine))
-                if "Score" in mine.columns:
-                    scores = pd.to_numeric(mine["Score"], errors="coerce")
-                    m2.metric("Latest gross", int(scores.iloc[-1] if pd.notna(scores.iloc[-1]) else 0))
-                    m3.metric("Best gross", int(scores.min() if scores.notna().any() else 0))
-        else:
-            st.info("No previous rounds for this player yet.")
-
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Start New Round", type="primary", use_container_width=True):
                 st.session_state.scorecard_submitted = False
                 st.session_state.current_hole = 1
+                st.session_state.hole_times = {}
                 st.session_state.hole_scores = {h: ACTIVE_PARS.get(h, 4) for h in range(1, 19)}
                 st.rerun()
         with c2:
@@ -437,24 +421,25 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
             back_label = "Not played" if front_only else str(back_total)
             st.markdown(f"<div style='background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:16px;text-align:center;'><h4 style='margin:0;color:#92400e;'>BACK 9</h4><p style='font-size:1.7rem;font-weight:700;margin:0;'>{back_label}</p></div>", unsafe_allow_html=True)
 
-        birdies = sum(1 for h in relevant if st.session_state.hole_scores[h] == ACTIVE_PARS.get(h, 4) - 1)
-        pars = sum(1 for h in relevant if st.session_state.hole_scores[h] == ACTIVE_PARS.get(h, 4))
-        bogeys = sum(1 for h in relevant if st.session_state.hole_scores[h] == ACTIVE_PARS.get(h, 4) + 1)
-        doubles = sum(1 for h in relevant if st.session_state.hole_scores[h] >= ACTIVE_PARS.get(h, 4) + 2)
         st.markdown(f"""
         <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:18px;margin:16px 0;">
             <h4 style="margin:0 0 10px 0;color:#166534;">How did I do?</h4>
             <p>Gross: {gross} | Net: {int(net)} | vs Par: {"+" if total_vs > 0 else ""}{total_vs}</p>
-            <p>Birdies: {birdies} | Pars: {pars} | Bogeys: {bogeys} | Double+: {doubles}</p>
         </div>
         """, unsafe_allow_html=True)
+
+        def stamp_hole():
+            if "hole_times" not in st.session_state:
+                st.session_state.hole_times = {}
+            st.session_state.hole_times[current_h] = datetime.now().strftime("%H:%M:%S")
 
         if current_h <= active_limit:
             st.subheader(f"Hole {current_h}")
             a, b, c = st.columns(3)
             a.info(f"Par {ACTIVE_PARS.get(current_h, 4)} | SI {ACTIVE_SI.get(current_h, current_h)}")
             b.metric("Your Score", st.session_state.hole_scores[current_h])
-            c.caption(st.session_state.competition)
+            keyed = st.session_state.get("hole_times", {}).get(current_h, "")
+            c.caption(keyed if keyed else st.session_state.competition)
             score = st.number_input(
                 "Enter Gross Strokes:", min_value=1, max_value=15,
                 value=int(st.session_state.hole_scores[current_h]), key=f"score_{current_h}"
@@ -468,14 +453,17 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
             with b2:
                 if current_h < active_limit:
                     if st.button("Save & Next", type="primary", use_container_width=True):
+                        stamp_hole()
                         st.session_state.current_hole += 1
                         st.rerun()
                 elif st.button("Finish Round", type="primary", use_container_width=True):
+                    stamp_hole()
                     st.session_state.current_hole = 19
                     st.rerun()
             with b3:
                 if current_h >= 9:
                     if st.button("Finish Front 9 / Go to Board", use_container_width=True):
+                        stamp_hole()
                         st.session_state.round_variant = "Front 9 Only"
                         st.session_state.current_hole = 19
                         st.rerun()
@@ -495,25 +483,47 @@ def render_scorecard_input(DB_FILE, FALLBACK_PARS):
                     if marker == "Choose marker...":
                         st.error("Please select a marker.")
                     else:
-                        new_row = pd.DataFrame([{
-                            "MemberID": st.session_state.player_id,
-                            "PlayerName": display_name,
-                            "Course": st.session_state.selected_course,
-                            "Handicap": hcp,
-                            "Score": gross,
-                            "Competition": st.session_state.competition,
-                            "Team": partners,
-                            "Format": st.session_state.round_variant,
-                            "MarkerVerification": marker,
-                            "PlayDate": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        }])
-                        os.makedirs(os.path.dirname(DB_FILE) or ".", exist_ok=True)
+                        keyed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        play_day = datetime.now().strftime("%Y-%m-%d")
+                        existing = pd.DataFrame()
                         if os.path.exists(DB_FILE):
-                            new_row.to_csv(DB_FILE, mode="a", header=False, index=False)
+                            try:
+                                existing = pd.read_csv(DB_FILE, engine="python", on_bad_lines="skip")
+                                existing.columns = existing.columns.str.strip()
+                            except Exception:
+                                existing = pd.DataFrame()
+                        already = False
+                        if not existing.empty and "MemberID" in existing.columns:
+                            day_col = existing["PlayDate"].astype(str).str[:10] if "PlayDate" in existing.columns else ""
+                            fmt_ok = existing["Format"].astype(str) == str(st.session_state.round_variant) if "Format" in existing.columns else True
+                            already = (
+                                (existing["MemberID"].astype(str) == str(st.session_state.player_id))
+                                & (day_col == play_day)
+                                & fmt_ok
+                            ).any()
+                        if already:
+                            st.error("This player already posted a card today for this format. Double entry blocked.")
                         else:
-                            new_row.to_csv(DB_FILE, mode="w", header=True, index=False)
-                        st.session_state.scorecard_submitted = True
-                        st.rerun()
+                            new_row = pd.DataFrame([{
+                                "MemberID": st.session_state.player_id,
+                                "PlayerName": display_name,
+                                "Course": st.session_state.selected_course,
+                                "Handicap": hcp,
+                                "Score": gross,
+                                "Competition": st.session_state.competition,
+                                "Team": partners,
+                                "Format": st.session_state.round_variant,
+                                "MarkerVerification": marker,
+                                "PlayDate": keyed_at,
+                                "KeyedAt": keyed_at
+                            }])
+                            os.makedirs(os.path.dirname(DB_FILE) or ".", exist_ok=True)
+                            if os.path.exists(DB_FILE):
+                                new_row.to_csv(DB_FILE, mode="a", header=False, index=False)
+                            else:
+                                new_row.to_csv(DB_FILE, mode="w", header=True, index=False)
+                            st.session_state.scorecard_submitted = True
+                            st.rerun()
 
     with tab2:
         st.subheader("Pre-Order to the Turn")

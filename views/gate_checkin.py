@@ -33,8 +33,17 @@ def render_gate_checkin():
     ]
     round_formats = ["Full 18 Holes", "Front 9 Only"]
 
+    def expected_event_code():
+        try:
+            return str(st.secrets["event"]["code"]).strip().upper()
+        except Exception:
+            return "LCC11"
+
     def save_player(player_id, full_name, handicap, home_club, playing_club,
-                    tee_set, competition, round_format, partners, reg_label):
+                    tee_set, competition, round_format, partners, reg_label, event_code):
+        if event_code.strip().upper() != expected_event_code():
+            st.error("Invalid tournament code.")
+            return
         st.session_state.authorized = True
         st.session_state.auth_type = "player"
         st.session_state.player_id = player_id
@@ -52,6 +61,7 @@ def render_gate_checkin():
         st.session_state.registration_type = reg_label
         st.session_state.scorecard_submitted = False
         st.session_state.current_hole = 1
+        st.session_state.hole_times = {}
         st.rerun()
 
     if reg_type == "Club Member":
@@ -67,13 +77,14 @@ def render_gate_checkin():
         competition = st.selectbox("Select Active Competition / Event:", competitions)
         round_format = st.selectbox("Select Planned Round Format:", round_formats)
         partners = st.text_input("Playing partners / team (optional)", placeholder="e.g. Flight A")
+        event_code = st.text_input("Today's tournament code")
 
         if st.button("Unlock Scorecard Portal", type="primary", use_container_width=True):
             if member_id.strip() and full_name.strip():
                 save_player(
                     member_id.strip(), full_name.strip(), handicap,
                     home_club, playing_club, tee_set, competition, round_format,
-                    partners, "Club Member"
+                    partners, "Club Member", event_code
                 )
             else:
                 st.warning("Please fill in Member ID and Full Name.")
@@ -83,7 +94,7 @@ def render_gate_checkin():
         col1, col2 = st.columns(2)
         with col1:
             home_club = st.selectbox("Select Your Official Home Club:", kenyan_clubs)
-            region = st.selectbox("Select Playing Club Region:", regions)
+            st.selectbox("Select Playing Club Region:", regions)
         with col2:
             playing_club = st.selectbox("Select Venue Playing Today:", kenyan_clubs)
             tee_set = st.selectbox("Select Tee Set Played:", tee_sets)
@@ -91,19 +102,20 @@ def render_gate_checkin():
         competition = st.selectbox("Select Active Competition / Event:", competitions)
         round_format = st.selectbox("Select Planned Round Format:", round_formats)
         partners = st.text_input("Playing partners / team (optional)", placeholder="e.g. Flight A")
+        event_code = st.text_input("Today's tournament code")
 
         if st.button("Register Guest Competitor", type="primary", use_container_width=True):
             if visitor_name.strip():
                 save_player(
                     "VISITOR", visitor_name.strip(), handicap,
                     home_club, playing_club, tee_set, competition, round_format,
-                    partners, "Visiting Player"
+                    partners, "Visiting Player", event_code
                 )
             else:
                 st.warning("Please enter the Visitor Full Name.")
 
     elif reg_type == "Sponsor / Guest (Non-Playing)":
-        st.info("Welcome. Scorecard access is for playing competitors. View the live leaderboard in the lounge.")
+        st.info("Welcome. Scorecard access is for playing competitors.")
 
     else:
         st.markdown("### Executive Portal Verification")
@@ -130,7 +142,6 @@ def render_gate_checkin():
             <p><strong>Name:</strong> {st.session_state.player_name}</p>
             <p><strong>Member / ID:</strong> {st.session_state.player_id}</p>
             <p><strong>Handicap:</strong> {st.session_state.get('player_hcp', 'N/A')}</p>
-            <p><strong>Home Club:</strong> {st.session_state.get('home_club', 'N/A')}</p>
             <p><strong>Playing Today:</strong> {st.session_state.get('playing_club', 'N/A')}</p>
             <p><strong>Competition:</strong> {st.session_state.get('competition', 'N/A')}</p>
             <p><strong>Format:</strong> {st.session_state.get('round_variant', 'N/A')}</p>
