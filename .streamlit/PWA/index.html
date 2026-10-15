@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#16a34a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="FairwayIQ" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <title>FairwayIQ</title>
+  <style>
+    html,body { margin:0; height:100%; background:#0b1220; }
+    iframe { border:0; width:100%; height:100%; }
+    .bar {
+      position:fixed; left:0; right:0; bottom:0; padding:8px 12px 14px;
+      background:#0a101c; color:#94a3b8; font:12px system-ui; text-align:center;
+    }
+  </style>
+</head>
+<body>
+  <iframe
+    title="FairwayIQ"
+    src="https://fairwayiq-golf-revenue-intelligence-leaderboard.streamlit.app/?embed=true"
+    allow="clipboard-write"
+  ></iframe>
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("sw.js");
+    }
+  </script>
+</body>
+</html>

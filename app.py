@@ -177,7 +177,6 @@ def require_role(allowed_roles: list):
 
 
 # ============================================================
-# ============================================================
 # 6. GATEWAY / LOGIN
 # ============================================================
 app_mode = None
@@ -289,7 +288,10 @@ if not (st.session_state.get("authorized") or
         )
 
     st.stop()
-# 7. AFTER LOGIN
+
+
+# ============================================================
+# 7. AFTER LOGIN (SIDEBAR & MODES)
 # ============================================================
 enable_pwa_with_offline_cache(
     player_id=st.session_state.player_id,
@@ -337,7 +339,8 @@ elif st.session_state.auth_type == "admin":
             "🏆 Tournament Leaderboard Monitor",
             "👥 Society Roster Manager",
             "⚙️ Tournament Match Play Control",
-            "⚙️ Course Directory Setup"
+            "⚙️ Course Directory Setup",
+            "⛳ LCC Handicap Conversion Desk"
         ]
     )
 else:
@@ -376,6 +379,11 @@ elif app_mode == "⚙️ Course Directory Setup":
     require_role(["admin"])
     from views.course_manager import render_course_manager
     render_course_manager()
+
+elif app_mode == "⛳ LCC Handicap Conversion Desk":
+    require_role(["admin"])
+    from views.handicap_calculator import render as render_handicap_calculator
+    render_handicap_calculator()
 
 
 # ============================================================

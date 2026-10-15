@@ -132,6 +132,29 @@ def init_db():
         PRIMARY KEY (player_id, hole_number)
     );
     """)
+
+    # 9. Course Conversion Brackets (WHS Lookup Tables for LCC Simba & Chui)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS course_conversion_brackets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        course_id TEXT NOT NULL,
+        gender TEXT NOT NULL,
+        min_index REAL NOT NULL,
+        max_index REAL NOT NULL,
+        course_handicap INTEGER NOT NULL
+    );
+    """)
+
+    # 10. Player Eligibility & Status Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS player_eligibility_status (
+        player_id TEXT PRIMARY KEY,
+        membership_status TEXT DEFAULT 'Member',
+        handicap_index REAL,
+        is_eligible INTEGER DEFAULT 1,
+        review_reason TEXT DEFAULT 'Verified'
+    );
+    """)
     
     # Seed default Kachumbari League configurations if the table is blank
     cursor.execute("SELECT COUNT(*) FROM society_settings;")
@@ -162,7 +185,7 @@ def init_db():
         
     conn.commit()
     conn.close()
-    print("Database initialized successfully with Match Play, Roster, Course, and PWA Live Sync schemas!")
+    print("Database initialized successfully with Match Play, Roster, Course, PWA Live Sync, and WHS Conversion schemas!")
 
 
 # =====================================================================
@@ -173,12 +196,6 @@ def sync_pwa_scorecard_payload(player_id: str, scores_dict: dict) -> dict:
     """
     Ingests batch scorecards sent from the PWA LocalStorage sync bridge.
     Enforces a Last-Write-Wins rule using ISO timestamps.
-    
-    Expected scores_dict payload format:
-    {
-       "1": {"score": 4, "ts": "2026-08-06T10:15:00.000Z"},
-       "2": {"score": 5, "ts": "2026-08-06T10:30:00.000Z"}
-    }
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -190,14 +207,12 @@ def sync_pwa_scorecard_payload(player_id: str, scores_dict: dict) -> dict:
             score_val = payload.get("score")
             client_ts = payload.get("ts", datetime.utcnow().isoformat())
             
-            # Fetch existing timestamp from SQLite
             cursor.execute(
                 "SELECT updated_at FROM live_scorecards WHERE player_id = ? AND hole_number = ?",
                 (player_id, hole_num)
             )
             existing = cursor.fetchone()
 
-            # UPSERT only if record doesn't exist OR client timestamp is newer
             if existing is None or client_ts > existing["updated_at"]:
                 cursor.execute("""
                     INSERT INTO live_scorecards (player_id, hole_number, score, updated_at)
@@ -241,6 +256,68 @@ def get_course_pars_and_si(course_name, tee_color="White"):
 
 
 # =====================================================================
+# WHS COURSE HANDICAP CONVERSION & ELIGIBILITY ENGINE
+# =====================================================================
+
+def lookup_course_handicap(course_id: str, gender: str, handicap_index: float) -> int:
+    """
+    Looks up the official Course Handicap based on the player's Handicap Index,
+    gender, and course/tee bracket from the LCC conversion charts.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    query = '''
+        SELECT course_handicap FROM course_conversion_brackets
+        WHERE course_id = ? AND gender = ? AND ? >= min_index AND ? <= max_index
+    '''
+    cursor.execute(query, (course_id, gender, handicap_index, handicap_index))
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result:
+        return result["course_handicap"]
+    return None
+
+
+def evaluate_player_eligibility(player_id: str, handicap_index: float) -> dict:
+    """
+    Evaluates whether a player meets eligibility rules to participate under 
+    the club's factor chart conditions.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT membership_status, is_eligible, review_reason 
+        FROM player_eligibility_status WHERE player_id = ?
+    ''', (player_id,))
+    record = cursor.fetchone()
+    conn.close()
+    
+    status = "Member"
+    is_eligible = True
+    reason = "Verified profile"
+    
+    if record:
+        status = record["membership_status"]
+        is_eligible = bool(record["is_eligible"])
+        reason = record["review_reason"] or "Passed manual check"
+        
+    # WHS safeguard: Max handicap index is 54.0
+    if handicap_index > 54.0:
+        is_eligible = False
+        reason = "Handicap Index exceeds maximum limit of 54.0"
+
+    return {
+        "player_id": player_id,
+        "membership_status": status,
+        "is_eligible": is_eligible,
+        "status_message": reason
+    }
+
+
+# =====================================================================
 # MATCH PLAY CALCULATIONS & DATA WRITING
 # =====================================================================
 
@@ -263,11 +340,11 @@ def record_match_score(match_id, p1_net, p2_net):
     draw_pts = settings['points_draw'] if settings else 1
     loss_pts = settings['points_loss'] if settings else 0
 
-    if p1_net < p2_net:     
+    if p1_net < p2_net:    
         p1_points, p2_points = win_pts, loss_pts
     elif p2_net < p1_net:   
         p1_points, p2_points = loss_pts, win_pts
-    else:                   
+    else:                 
         p1_points, p2_points = draw_pts, draw_pts
         
     cursor.execute("""
