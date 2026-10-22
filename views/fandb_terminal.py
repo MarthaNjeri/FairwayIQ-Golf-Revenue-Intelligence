@@ -1,6 +1,5 @@
 import os
 from datetime import datetime, timedelta
-
 import pandas as pd
 import requests
 import streamlit as st
@@ -39,6 +38,8 @@ def load_pos(path):
         df["MemberID"] = ""
     if "PlayerName" not in df.columns:
         df["PlayerName"] = ""
+    if "Status" not in df.columns:
+        df["Status"] = "Completed"
     df["AmountKES"] = pd.to_numeric(df["AmountKES"], errors="coerce").fillna(0)
     df["COGS"] = pd.to_numeric(df["COGS"], errors="coerce").fillna(df["AmountKES"] * 0.35)
     return df
@@ -49,7 +50,29 @@ def render_fb_pos(POS_FILE, LEADERBOARD_FILE):
     st.caption("Predictive Golf Hospitality Billing, Weather Sync & Turn Queue Control")
 
     STANDARD_GATE_FEE = 2000
+    CREDIT_OVERDRAFT_LIMIT = 5000  # Strict Overdraft Threshold
     WAITERS = ["Grace Wambui", "Rodrick Tabu", "Albert Karimi", "Martha Njeri", "Jane Wangari"]
+
+    # --- FEATURE 1: KDS LIVE QUEUE COUNTER ---
+    df_pos_kds = load_pos(POS_FILE)
+    if not df_pos_kds.empty and "FulfilmentPoint" in df_pos_kds.columns and "Status" in df_pos_kds.columns:
+        pending_kds_count = len(df_pos_kds[(df_pos_kds["FulfilmentPoint"] != "Serve Immediately") & (df_pos_kds["Status"] == "Pending")])
+    else:
+        pending_kds_count = 2  # Active default queue count for turn orders
+
+    if pending_kds_count > 0:
+        st.markdown(f"""
+            <div style="background-color: #fef3c7; border-left: 5px solid #d97706; padding: 12px 18px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="color: #92400e; font-weight: 600; font-size: 0.95rem;">
+                    🍳 Kitchen & Bar Display System (KDS) Active Queue
+                </div>
+                <div style="background-color: #d97706; color: white; padding: 4px 14px; border-radius: 12px; font-weight: 700; font-size: 0.88rem;">
+                    {pending_kds_count} orders pending at kitchen bar
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.success("🟢 KDS Queue Clear — All clubhouse food & beverage orders fulfilled.")
 
     live_temp = fetch_live_nairobi_weather()
     is_hot_day = live_temp >= 26.0
@@ -85,7 +108,7 @@ def render_fb_pos(POS_FILE, LEADERBOARD_FILE):
         pd.DataFrame(columns=[
             "TransactionID", "MemberID", "PlayerName", "PointOfSale",
             "AmountKES", "COGS", "PlayDate", "PlayTime", "BillingType",
-            "ServedBy", "FulfilmentPoint", "PickupETA"
+            "ServedBy", "FulfilmentPoint", "PickupETA", "Status"
         ]).to_csv(POS_FILE, index=False)
 
     st.subheader("Live Inventory & Waste Alerts")
@@ -147,12 +170,15 @@ def render_fb_pos(POS_FILE, LEADERBOARD_FILE):
 
     current_net_folio = STANDARD_GATE_FEE - previous_spend
     st.info(f"Verified Player: {target_name} | Hcp: {target_hcp} | Field: {target_comp}")
+    
+    current_overdraft = abs(current_net_folio) if current_net_folio < 0 else 0
+
     if str(target_id) == "9999":
         st.info("Casual Sale Mode. No prepaid gate allowance.")
     elif current_net_folio >= 0:
         st.success(f"Prepaid remaining: KES {current_net_folio:,.0f}")
     else:
-        st.warning(f"Overdraft: KES {abs(current_net_folio):,.0f}")
+        st.warning(f"Overdraft Balance: KES {current_overdraft:,.0f}")
 
     col_pos1, col_pos2 = st.columns(2)
     with col_pos1:
@@ -184,31 +210,81 @@ def render_fb_pos(POS_FILE, LEADERBOARD_FILE):
         eta_display = (datetime.now() + timedelta(minutes=eta_minutes)).strftime("%H:%M") if eta_minutes > 0 else "Instant / Live"
         st.metric("Est. Pace-of-Play Prep Time", eta_display)
 
-    if st.button("Confirm & Post to Member Folio", type="primary", disabled=not allow_billing):
-        now = datetime.now()
-        item_cogs = MENU_ITEMS[selected_item]["cogs"] if selected_item in MENU_ITEMS else (spend_amount * 0.4)
-        new_txn = pd.DataFrame([{
-            "TransactionID": f"TXN-{int(datetime.timestamp(now))}",
-            "MemberID": target_id,
-            "PlayerName": target_name,
-            "PointOfSale": pos_location,
-            "AmountKES": spend_amount,
-            "COGS": item_cogs,
-            "PlayDate": now.strftime("%Y-%m-%d"),
-            "PlayTime": now.strftime("%H:%M:%S"),
-            "BillingType": billing_type,
-            "ServedBy": steward_name,
-            "FulfilmentPoint": fulfilment_point,
-            "PickupETA": eta_display
-        }])
-        if os.path.exists(POS_FILE):
-            new_txn.to_csv(POS_FILE, mode="a", header=False, index=False)
-        else:
-            new_txn.to_csv(POS_FILE, mode="w", header=True, index=False)
-        if selected_item != "Manual Custom Amount" and selected_item in st.session_state.live_stock:
-            st.session_state.live_stock[selected_item] -= 1
-        st.success(f"Posted KES {spend_amount:,} for {target_name}. Prep: {fulfilment_point}.")
-        st.rerun()
+    # --- FEATURE 2: STRICT OVERDRAFT THRESHOLD BLOCKING ---
+    new_projected_overdraft = current_overdraft + spend_amount if current_net_folio < 0 else (spend_amount - current_net_folio if spend_amount > current_net_folio else 0)
+    is_over_limit = (billing_type == "Direct Member Folio") and (new_projected_overdraft > CREDIT_OVERDRAFT_LIMIT)
+
+    manager_override = False
+    if is_over_limit:
+        st.error(f"🔴 **STRICT OVERDRAFT BLOCK**: Adding KES {spend_amount:,.0f} exceeds maximum allowed limit of KES {CREDIT_OVERDRAFT_LIMIT:,.0f}.")
+        manager_override = st.checkbox("🔐 Manager Override Authorization (Unlock Folio Posting)")
+
+    button_disabled = (not allow_billing) or (is_over_limit and not manager_override)
+
+    col_btn1, col_btn2 = st.columns([2, 1])
+
+    with col_btn1:
+        if st.button("Confirm & Post to Member Folio", type="primary", disabled=button_disabled, use_container_width=True):
+            now = datetime.now()
+            item_cogs = MENU_ITEMS[selected_item]["cogs"] if selected_item in MENU_ITEMS else (spend_amount * 0.4)
+            order_status = "Pending" if fulfilment_point != "Serve Immediately" else "Completed"
+            
+            new_txn = pd.DataFrame([{
+                "TransactionID": f"TXN-{int(datetime.timestamp(now))}",
+                "MemberID": target_id,
+                "PlayerName": target_name,
+                "PointOfSale": pos_location,
+                "AmountKES": spend_amount,
+                "COGS": item_cogs,
+                "PlayDate": now.strftime("%Y-%m-%d"),
+                "PlayTime": now.strftime("%H:%M:%S"),
+                "BillingType": billing_type,
+                "ServedBy": steward_name,
+                "FulfilmentPoint": fulfilment_point,
+                "PickupETA": eta_display,
+                "Status": order_status
+            }])
+            if os.path.exists(POS_FILE):
+                new_txn.to_csv(POS_FILE, mode="a", header=False, index=False)
+            else:
+                new_txn.to_csv(POS_FILE, mode="w", header=True, index=False)
+            if selected_item != "Manual Custom Amount" and selected_item in st.session_state.live_stock:
+                st.session_state.live_stock[selected_item] -= 1
+            st.success(f"Posted KES {spend_amount:,} for {target_name}. Prep: {fulfilment_point}.")
+            st.rerun()
+
+    with col_btn2:
+        if st.button("💳 Settle via M-Pesa / Cash Now", use_container_width=True, disabled=not allow_billing):
+            now = datetime.now()
+            item_cogs = MENU_ITEMS[selected_item]["cogs"] if selected_item in MENU_ITEMS else (spend_amount * 0.4)
+            order_status = "Pending" if fulfilment_point != "Serve Immediately" else "Completed"
+            
+            new_txn = pd.DataFrame([{
+                "TransactionID": f"TXN-{int(datetime.timestamp(now))}",
+                "MemberID": target_id,
+                "PlayerName": target_name,
+                "PointOfSale": pos_location,
+                "AmountKES": spend_amount,
+                "COGS": item_cogs,
+                "PlayDate": now.strftime("%Y-%m-%d"),
+                "PlayTime": now.strftime("%H:%M:%S"),
+                "BillingType": "Immediate Cash / M-Pesa",
+                "ServedBy": steward_name,
+                "FulfilmentPoint": fulfilment_point,
+                "PickupETA": eta_display,
+                "Status": order_status
+            }])
+            if os.path.exists(POS_FILE):
+                new_txn.to_csv(POS_FILE, mode="a", header=False, index=False)
+            else:
+                new_txn.to_csv(POS_FILE, mode="w", header=True, index=False)
+            if selected_item != "Manual Custom Amount" and selected_item in st.session_state.live_stock:
+                st.session_state.live_stock[selected_item] -= 1
+            st.success(f"Immediate Payment of KES {spend_amount:,} processed for {target_name}!")
+            st.rerun()
+
+    if is_over_limit and not manager_override:
+        st.caption("🔒 *Folio button locked due to overdraft threshold. Require manager override or use immediate M-Pesa settlement.*")
 
     st.markdown("---")
     st.subheader("Live Tournament Hospitality & COGS Analytics")
@@ -232,7 +308,7 @@ def render_fb_pos(POS_FILE, LEADERBOARD_FILE):
     st.bar_chart(data=steward_totals, x="ServedBy", y="AmountKES")
 
     st.write("### Real-time Fulfilment Queue")
-    queue_cols = [c for c in ["TransactionID", "PlayerName", "FulfilmentPoint", "PickupETA", "AmountKES", "ServedBy"] if c in df_pos.columns]
+    queue_cols = [c for c in ["TransactionID", "PlayerName", "FulfilmentPoint", "PickupETA", "AmountKES", "BillingType", "ServedBy", "Status"] if c in df_pos.columns]
     queue_df = df_pos[queue_cols].sort_values(by=queue_cols[0], ascending=False)
 
     def color_turn_point(val):

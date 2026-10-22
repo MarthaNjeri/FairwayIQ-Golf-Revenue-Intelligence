@@ -297,11 +297,13 @@ if not (st.session_state.get("authorized") or
 # ============================================================
 # 7. AFTER LOGIN (SIDEBAR & MODES)
 # ============================================================
-enable_pwa_with_offline_cache(
-    player_id=st.session_state.player_id,
-    current_hole=st.session_state.current_hole,
-    current_scores=st.session_state.hole_scores
-)
+# Only render the mobile offline scorecard widget for players
+if st.session_state.get("auth_type") == "player":
+    enable_pwa_with_offline_cache(
+        player_id=st.session_state.player_id,
+        current_hole=st.session_state.current_hole,
+        current_scores=st.session_state.hole_scores
+    )
 
 st.sidebar.title("⛳ FairwayIQ")
 st.sidebar.success(f"Logged in as: **{st.session_state.auth_type.upper()}**")
@@ -339,17 +341,61 @@ elif st.session_state.auth_type == "admin":
 
     st.sidebar.markdown("---")
 
-    app_mode = st.sidebar.selectbox(
-        "Select Admin Console:",
-        [
-            "🏆 Tournament Leaderboard Monitor",
-            "👥 Society Roster Manager",
-            "⚙️ Tournament Match Play Control",
-            "⚙️ Course Directory Setup",
-            "⛳ LCC Handicap Conversion Desk",
-            "🛡️ Security & Access Audit"
-        ]
+    # Top Horizontal ERP Navigation Bar (Enlarged & Full Width)
+    from streamlit_option_menu import option_menu
+
+    selected_console = option_menu(
+        menu_title=None,
+        options=[
+            "Command Center",
+            "Leaderboards",
+            "Roster Manager",
+            "Match Play",
+            "Course Setup",
+            "Handicap Desk",
+            "WHS Recalc",
+            "Security Audit"
+        ],
+        icons=["bar-chart-fill", "trophy-fill", "people-fill", "gear-fill", "gear-wide-connected", "flag-fill", "calculator-fill", "shield-lock-fill"],
+        default_index=0,
+        orientation="horizontal",
+        styles={
+            "container": {
+                "width": "100%", 
+                "max-width": "100%", 
+                "padding": "6px", 
+                "background-color": "#1e4275", 
+                "border-radius": "12px", 
+                "margin-bottom": "20px"
+            },
+            "icon": {"color": "#ffffff", "font-size": "15px"}, 
+            "nav-link": {
+                "font-size": "13px", 
+                "font-weight": "600", 
+                "text-align": "center", 
+                "padding": "10px 12px", 
+                "margin": "2px", 
+                "color": "#ffffff", 
+                "--hover-color": "rgba(255,255,255,0.15)"
+            },
+            "nav-link-selected": {
+                "background-color": "#3b82f6", 
+                "font-weight": "bold"
+            },
+        }
     )
+    # Map navbar selections to your backend module router modes
+    mode_mapping = {
+        "Command Center": "📊 Executive Command Center",
+        "Leaderboards": "🏆 Tournament Leaderboard Monitor",
+        "Roster Manager": "👥 Society Roster Manager",
+        "Match Play": "⚙️ Tournament Match Play Control",
+        "Course Setup": "⚙️ Course Directory Setup",
+        "Handicap Desk": "⛳ LCC Handicap Conversion Desk",
+        "WHS Recalc": "⛳ Post-Tournament HCI Recalculation",
+        "Security Audit": "🛡️ Security & Access Audit"
+    }
+    app_mode = mode_mapping[selected_console]
 else:
     app_mode = None
 
@@ -392,10 +438,23 @@ elif app_mode == "⛳ LCC Handicap Conversion Desk":
     from views.handicap_calculator import render as render_handicap_calculator
     render_handicap_calculator()
 
+elif app_mode == "⛳ Post-Tournament HCI Recalculation":
+        require_role(["admin"])
+        from views.whs_calculator import render_post_tournament_handicaps
+        render_post_tournament_handicaps()
+
+elif app_mode == "📊 Executive Command Center":
+    require_role(["admin"])
+    from views.command_center import render_command_center
+    render_command_center()
+
+
 elif app_mode == "🛡️ Security & Access Audit":
     require_role(["admin"])
     st.subheader("🛡️ Security & Access Audit Logs")
     st.markdown("Monitor successful logins, role transitions, and unauthorized or failed entry attempts.")
+
+    
 
     conn = get_db_connection()
     df_logs = pd.read_sql("SELECT * FROM access_audit_logs ORDER BY timestamp DESC", conn)
