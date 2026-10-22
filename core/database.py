@@ -9,17 +9,25 @@ DB_PATH = "data/fairway_iq.db"
 def get_db_connection():
     """
     Returns a thread-safe connection configured with WAL mode and high busy-timeout
-    to handle multi-user reads/writes without database locks.
+    to handle multi-user reads/writes without database locks. Safely falls back if running
+    on read-only cloud filesystems (e.g. Streamlit Cloud).
     """
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=20.0, check_same_thread=False)
     
-    # ⚡ Performance & Concurrency Tuning
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.execute("PRAGMA busy_timeout=5000;")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    
+    # ⚡ Performance & Concurrency Tuning (Safe Cloud Fallback)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+    except sqlite3.OperationalError:
+        pass  # Fallback to default journal mode on Streamlit Cloud read-only mounts
+
+    try:
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
+        conn.execute("PRAGMA foreign_keys = ON;")
+    except sqlite3.OperationalError:
+        pass
+
     conn.row_factory = sqlite3.Row  
     return conn
 
@@ -88,11 +96,11 @@ def init_db():
     CREATE TABLE IF NOT EXISTS golf_courses (
         course_id INTEGER PRIMARY KEY AUTOINCREMENT,
         course_name TEXT NOT NULL,
-        location TEXT DEFAULT "Kenya"
+        location TEXT DEFAULT 'Kenya'
     );
     """)
 
-    # 6. Course Holes Table (Stores Par and Stroke Index mapping per tee set)
+    # 6. Course Holes Table (Stores Par, Stroke Index, and Yardage mapping per tee set)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS course_holes (
         hole_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,11 +109,18 @@ def init_db():
         hole_number INTEGER NOT NULL,
         par INTEGER NOT NULL,
         stroke_index INTEGER NOT NULL,
+        yardage INTEGER DEFAULT 350,
         FOREIGN KEY (course_id) REFERENCES golf_courses(course_id) ON DELETE CASCADE,
         UNIQUE(course_id, tee_color, hole_number)
     );
     """)
     
+    # Check & migrate 'yardage' column if missing in older database instances
+    cursor.execute("PRAGMA table_info(course_holes);")
+    columns = [row["name"] for row in cursor.fetchall()]
+    if "yardage" not in columns:
+        cursor.execute("ALTER TABLE course_holes ADD COLUMN yardage INTEGER DEFAULT 350;")
+
     # 7. Relational Scorecards Table (For historical round summaries)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS scorecards (
@@ -171,15 +186,15 @@ def init_db():
         limuru_id = cursor.lastrowid
         
         limuru_white_tees = [
-            (1, 4, 3), (2, 4, 15), (3, 3, 11), (4, 5, 1), (5, 4, 9), (6, 4, 5), (7, 3, 13), (8, 4, 7), (9, 5, 17),
-            (10, 4, 4), (11, 4, 14), (12, 3, 12), (13, 5, 2), (14, 4, 10), (15, 4, 8), (16, 3, 16), (17, 4, 6), (18, 5, 18)
+            (1, 4, 3, 380), (2, 4, 15, 410), (3, 3, 11, 165), (4, 5, 1, 512), (5, 4, 9, 390), (6, 4, 5, 405), (7, 3, 13, 175), (8, 4, 7, 420), (9, 5, 17, 525),
+            (10, 4, 4, 385), (11, 4, 14, 415), (12, 3, 12, 155), (13, 5, 2, 505), (14, 4, 10, 395), (15, 4, 8, 410), (16, 3, 16, 180), (17, 4, 6, 425), (18, 5, 18, 530)
         ]
         
-        for hole_num, par, si in limuru_white_tees:
+        for hole_num, par, si, yds in limuru_white_tees:
             cursor.execute("""
-                INSERT OR IGNORE INTO course_holes (course_id, tee_color, hole_number, par, stroke_index)
-                VALUES (?, 'White', ?, ?, ?)
-            """, (limuru_id, hole_num, par, si))
+                INSERT OR IGNORE INTO course_holes (course_id, tee_color, hole_number, par, stroke_index, yardage)
+                VALUES (?, 'White', ?, ?, ?, ?)
+            """, (limuru_id, hole_num, par, si, yds))
             
         print("Limuru Country Club white tee specs successfully seeded!")
         
@@ -239,12 +254,12 @@ def sync_pwa_scorecard_payload(player_id: str, scores_dict: dict) -> dict:
 def get_course_pars_and_si(course_name, tee_color="White"):
     """
     Queries database for a given course & tee set. 
-    Returns a dict formatted as: {hole_number: (par, stroke_index)}
+    Returns a dict formatted as: {hole_number: (par, stroke_index, yardage)}
     """
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT h.hole_number, h.par, h.stroke_index 
+        SELECT h.hole_number, h.par, h.stroke_index, COALESCE(h.yardage, 350) as yardage
         FROM course_holes h
         JOIN golf_courses c ON h.course_id = c.course_id
         WHERE c.course_name = ? AND h.tee_color = ?
@@ -252,7 +267,7 @@ def get_course_pars_and_si(course_name, tee_color="White"):
     """, (course_name, tee_color))
     rows = cursor.fetchall()
     conn.close()
-    return {row['hole_number']: (row['par'], row['stroke_index']) for row in rows}
+    return {row['hole_number']: (row['par'], row['stroke_index'], row['yardage']) for row in rows}
 
 
 # =====================================================================
