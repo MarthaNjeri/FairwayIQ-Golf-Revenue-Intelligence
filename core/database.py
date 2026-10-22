@@ -3,23 +3,33 @@ import os
 import random
 from datetime import datetime
 
-DB_PATH = "data/fairway_iq.db"
+# Use absolute paths and check write permissions for Streamlit Cloud /tmp fallback
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+
+try:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    test_file = os.path.join(DATA_DIR, ".write_test")
+    with open(test_file, "w") as f:
+        f.write("test")
+    os.remove(test_file)
+    DB_PATH = os.path.join(DATA_DIR, "fairway_iq.db")
+except Exception:
+    DB_PATH = "/tmp/fairway_iq.db"
 
 
 def get_db_connection():
     """
-    Returns a thread-safe connection configured with WAL mode and high busy-timeout
-    to handle multi-user reads/writes without database locks. Safely falls back if running
-    on read-only cloud filesystems (e.g. Streamlit Cloud).
+    Returns a thread-safe connection with automatic fallback to /tmp 
+    if the cloud filesystem restricts writes to the project directory.
     """
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=20.0, check_same_thread=False)
     
     # ⚡ Performance & Concurrency Tuning (Safe Cloud Fallback)
     try:
         conn.execute("PRAGMA journal_mode=WAL;")
     except sqlite3.OperationalError:
-        pass  # Fallback to default journal mode on Streamlit Cloud read-only mounts
+        pass  
 
     try:
         conn.execute("PRAGMA synchronous=NORMAL;")
@@ -170,6 +180,17 @@ def init_db():
         review_reason TEXT DEFAULT 'Verified'
     );
     """)
+
+    # 11. Access Audit & Security Logs Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS access_audit_logs (
+        log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_role TEXT NOT NULL,
+        action TEXT NOT NULL,
+        status TEXT NOT NULL,
+        timestamp TEXT NOT NULL
+    );
+    """)
     
     # Seed default Kachumbari League configurations if the table is blank
     cursor.execute("SELECT COUNT(*) FROM society_settings;")
@@ -200,7 +221,7 @@ def init_db():
         
     conn.commit()
     conn.close()
-    print("Database initialized successfully with Match Play, Roster, Course, PWA Live Sync, and WHS Conversion schemas!")
+    print("Database initialized successfully with Match Play, Roster, Course, PWA Live Sync, WHS Conversion, and Audit schemas!")
 
 
 # =====================================================================
@@ -415,6 +436,27 @@ def generate_round_pairings(round_id, society_id, season_id):
     conn.commit()
     conn.close()
     return f"Successfully generated {pairings_created} head-to-head matches!"
+
+
+# =====================================================================
+# SECURITY & ACCESS AUDIT LOGGING
+# =====================================================================
+
+def log_access_attempt(role: str, action: str, status: str):
+    """
+    Logs user access attempts, role switches, and security/unauthorized entries.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INS
+        """, (role, action, status, datetime.utcnow().isoformat()))
+        conn.commit()
+    except Exception as e:
+        print(f"Error logging access attempt: {e}")
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

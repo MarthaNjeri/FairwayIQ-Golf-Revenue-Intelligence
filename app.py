@@ -3,7 +3,7 @@ import streamlit.components.v1 as components
 import pandas as pd
 import json
 import os
-from core.database import init_db, get_db_connection, get_course_pars_and_si
+from core.database import init_db, get_db_connection, get_course_pars_and_si, log_access_attempt
 
 # ============================================================
 # 1. PAGE CONFIG
@@ -67,7 +67,7 @@ def enable_pwa_with_offline_cache(player_id="1", current_hole=1, current_scores=
     if (!targetDoc.querySelector('link[rel="manifest"]')) {{
         const manifestLink = targetDoc.createElement('link');
         manifestLink.rel = 'manifest';
-        manifestLink.href = 'data:application/json;base64,eyJzaG9ydF9uYW1lIjoiRmFpcndheUlRIiwibmFtZSI6IkZhaXJ3YXlJUSBHb2xmIFJldmVudWUgJiBPcGVyYXRpb25zIiwiaWNvbnMiOlt7InNyYyI6Imh0dHBzOi8vY2RuLWljb25zLXBuZy5mbGF0aWNvbi5jb20vNTEyLzMwNzYvMzA3NjQxMy5wbmciLCJ0eXBlIjoiaW1hZ2UvcG5nIiwic2l6ZXMiOiIxOTJ4MTkyIn0seyJzcmMiOiJodHRwczovL2Nkbi1pY29ucy1wbmcuZmxhdGljb24uY29tLzUxMi8zMDc2LzMwNzY0MTMucG5nIiwidHlwZSI6ImltYWdlL3BuZyIsInNpemVzIjo1MTJ4NTEyfV0sInN0YXJ0X3VybCI6Ii8iLCJiYWNrZ3JvdW5kX2NvbG9yIjoiI2ZmZmZmZiIsInRoZW1lX2NvbG9yIjoiIzBiM2QyZSIsImRpc3BsYXkiOiJzdGFuZGFsb25lIn0=';
+        manifestLink.href = 'data:application/json;base64,eyJzaG9ydF9uYW1lIjoiRmFpcndheUlRIiwibmFtZSI6IkZhaXJ3YXlJUSBHb2xmIFJldmVudWUgJiBPcGVyYXRpb25zIiwiaWNvbnMiOlt7InNyYyI6Imh0dHBzOi8vY2RuLWljb25zLXBuZy5mbGF0aWNvbi5jb20vNTEyLzMwNzYvMzA3NjQxMy5wbmciLCJ0eXBlIjoiaW1hZ2UvcG5nIiwic2l6ZXMiOiIxOTJ4MTkyIn0seyJzcmMiOiJodHRwczovL2Nkbi1pY29ucy1wbmcuZmxhdGljb24uY29tLzUxMi8zMDc2LzMwNzY0MTMucG5nIiwidHlwZSI6ImltYWdlL3BuZyIsIHNpemVzIjo1MTJ4NTEyfV0sInN0YXJ0X3VybCI6Ii8iLCJiYWNrZ3JvdW5kX2NvbG9yIjoiI2ZmZmZmZiIsInRoZW1lX2NvbG9yIjoiIzBiM2QyZSIsImRpc3BsYXkiOiJzdGFuZGFsb25lIn0=';
         targetDoc.head.appendChild(manifestLink);
     }}
 
@@ -262,10 +262,12 @@ if not (st.session_state.get("authorized") or
                     target_staff_pin = "2026"
                 if st.button("Login to F&B Terminal", type="primary", use_container_width=True):
                     if staff_pin == target_staff_pin:
+                        log_access_attempt("staff", "F&B Terminal Login", "SUCCESS")
                         st.session_state.staff_authenticated = True
                         st.session_state.auth_type = "staff"
                         st.rerun()
                     else:
+                        log_access_attempt("staff", "F&B Terminal Login", "FAILED")
                         st.error("Invalid Staff PIN")
 
             else:
@@ -276,10 +278,12 @@ if not (st.session_state.get("authorized") or
                     target_pin = "1800"
                 if st.button("Login to Admin Console", type="primary", use_container_width=True):
                     if admin_pin == target_pin:
+                        log_access_attempt("admin", "Admin Console Login", "SUCCESS")
                         st.session_state.admin_authenticated = True
                         st.session_state.auth_type = "admin"
                         st.rerun()
                     else:
+                        log_access_attempt("admin", "Admin Console Login", "FAILED")
                         st.error("Invalid Administrative PIN")
 
         st.markdown(
@@ -303,6 +307,8 @@ st.sidebar.title("⛳ FairwayIQ")
 st.sidebar.success(f"Logged in as: **{st.session_state.auth_type.upper()}**")
 
 if st.sidebar.button("🚪 Logout"):
+    current_role = st.session_state.get("auth_type", "unknown")
+    log_access_attempt(current_role, "Logout", "SUCCESS")
     for key in ["authorized", "staff_authenticated", "admin_authenticated", "auth_type"]:
         st.session_state[key] = False if key != "auth_type" else None
     st.rerun()
@@ -340,7 +346,8 @@ elif st.session_state.auth_type == "admin":
             "👥 Society Roster Manager",
             "⚙️ Tournament Match Play Control",
             "⚙️ Course Directory Setup",
-            "⛳ LCC Handicap Conversion Desk"
+            "⛳ LCC Handicap Conversion Desk",
+            "🛡️ Security & Access Audit"
         ]
     )
 else:
@@ -384,6 +391,39 @@ elif app_mode == "⛳ LCC Handicap Conversion Desk":
     require_role(["admin"])
     from views.handicap_calculator import render as render_handicap_calculator
     render_handicap_calculator()
+
+elif app_mode == "🛡️ Security & Access Audit":
+    require_role(["admin"])
+    st.subheader("🛡️ Security & Access Audit Logs")
+    st.markdown("Monitor successful logins, role transitions, and unauthorized or failed entry attempts.")
+
+    conn = get_db_connection()
+    df_logs = pd.read_sql("SELECT * FROM access_audit_logs ORDER BY timestamp DESC", conn)
+    conn.close()
+
+    if df_logs.empty:
+        st.info("No access logs recorded yet.")
+    else:
+        total_attempts = len(df_logs)
+        failed_attempts = len(df_logs[df_logs['status'] == 'FAILED'])
+        
+        col1, col2 = st.columns(2)
+        col1.metric("Total Access Events", total_attempts)
+        col2.metric("Failed / Unauthorized Attempts", failed_attempts, delta_color="inverse")
+
+        st.divider()
+
+        st.dataframe(
+            df_logs,
+            use_container_width=True,
+            column_config={
+                "log_id": "ID",
+                "user_role": "User Role",
+                "action": "Action Performed",
+                "status": "Status",
+                "timestamp": "Timestamp (UTC)"
+            }
+        )
 
 
 # ============================================================
